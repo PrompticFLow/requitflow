@@ -5,18 +5,22 @@ export async function GET(req: Request) {
   try {
     const user = await getCurrentUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const hasAdzuna = !!(process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY);
+    const hasJobBoard = !!process.env.JOB_BOARD_API_KEY;
     const hasOpenRouter = !!process.env.OPENROUTER_API_KEY;
+    const hasNvidia = !!process.env.NVIDIA_API_KEY;
+    const activeProvider = process.env.AI_PROVIDER === 'nvidia' ? 'NVIDIA' : 'OpenRouter';
 
     return NextResponse.json({
       settings: {
-        adzunaConfigured: hasAdzuna,
+        jobBoardConfigured: hasJobBoard,
         openRouterConfigured: hasOpenRouter,
-        defaultCountry: process.env.ADZUNA_DEFAULT_COUNTRY || 'gb',
-        cacheDuration: process.env.ADZUNA_CACHE_MINUTES || '15',
+        nvidiaConfigured: hasNvidia,
+        activeProvider,
+        defaultCountry: 'US',
+        cacheDuration: 60,
         dailyLimit: process.env.JOB_SEARCH_DAILY_LIMIT || '100',
         aiBatchSize: process.env.AI_JOB_ANALYSIS_BATCH_SIZE || '10',
       }

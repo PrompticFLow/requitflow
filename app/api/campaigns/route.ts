@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 
 export async function GET(req: Request) {
   const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
   try {
     const campaigns = await prisma.campaign.findMany({
@@ -33,10 +33,14 @@ export async function GET(req: Request) {
       return { ...camp, totalDrafts, pendingReview, approvedEmail1 };
     }));
 
-    return NextResponse.json({ campaigns: enriched });
+    return NextResponse.json({ success: true, campaigns: enriched });
   } catch (error: any) {
     console.error('Fetch campaigns error:', error);
-    return NextResponse.json({ error: 'Something went wrong while loading your campaigns. Please try again.' }, { status: 500 });
+    return NextResponse.json({ 
+      success: false, 
+      error: 'Something went wrong while loading your campaigns. Please try again.',
+      technicalError: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
   }
 }
 
@@ -57,31 +61,48 @@ export async function POST(req: Request) {
         goal: data.goal,
         campaignType: data.campaignType || 'Client Outreach',
         targetAudience: data.targetAudience,
+        targetIndustry: data.targetIndustry,
+        targetCompanyType: data.targetCompanyType,
+        targetRoles: data.targetRoles,
+        targetMarket: data.targetMarket,
+        location: data.location,
         industry: data.industry,
         offer: data.offer,
         tone: data.tone || 'Professional',
         language: data.language || 'English',
         ctaType: data.ctaType || 'Book Discovery Call',
+        ctaText: data.ctaText,
         ctaLink: data.ctaLink,
         bookingLink: data.bookingLink || data.ctaLink,
+        bookingMethod: data.bookingMethod,
+        bookingLinkStrategy: data.bookingLinkStrategy,
         senderName: data.senderName,
         agencyName: data.agencyName,
         emailSignature: data.emailSignature,
         sendingMode: data.sendingMode || 'Human Approval Mode',
         status: 'Draft',
         userId: user.id,
-        // New fields from PRD §22
         problemSolved: data.problemSolved,
         mainBenefit: data.mainBenefit,
+        uniqueMechanism: data.uniqueMechanism,
         proofCaseStudy: data.proofCaseStudy,
+        painPoints: data.painPoints,
+        desiredOutcome: data.desiredOutcome,
+        objections: data.objections,
+        avoidSaying: data.avoidSaying,
         unsubscribeLine: data.unsubscribeLine,
         senderEmail: data.senderEmail,
         dailyLimit: parseInt(String(data.dailyLimit)) || 50,
         followUpCount: parseInt(String(data.followUpCount)) || 5,
         personalizationLevel: data.personalizationLevel,
+        personalizationStyle: data.personalizationStyle,
+        mentionCompanyName: data.mentionCompanyName ?? true,
+        companyFallback: data.companyFallback,
+        useKnowledgeBase: data.useKnowledgeBase ?? true,
         emailLength: data.emailLength,
         spamSafety: data.spamSafety,
         ctaStyle: data.ctaStyle,
+        followUpStyle: data.followUpStyle,
       }
     });
 

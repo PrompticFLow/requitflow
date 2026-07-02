@@ -11,17 +11,24 @@ export async function POST(req: Request) {
 
     const now = new Date();
 
-    // Find all approved, scheduled emails that are due
+    // Find all approved, pending emails that are due
     const dueEmails = await prisma.emailSequence.findMany({
       where: {
-        status: 'Scheduled', // Must be scheduled
+        status: 'Pending', // changed to Pending per requirements
         approvalStatus: 'Approved',
         scheduledAt: { lte: now },
+        campaign: { status: 'Active' },
+        lead: {
+          email: { not: null },
+          status: { notIn: ['Replied', 'Unsubscribed', 'Booked'] }
+        }
       },
       include: {
         lead: true,
         campaign: true,
-        user: true
+        user: {
+          include: { smtpAccount: true }
+        }
       },
       take: 50 // process in batches of 50
     });
@@ -29,11 +36,16 @@ export async function POST(req: Request) {
     const results = [];
 
     for (const email of dueEmails) {
-      // We no longer check for SMTP account status here.
-      // sendCampaignEmail handles verification internally using SendGrid env variables.
+      // Check SMTP verified
+      const smtp = email.user.smtpAccount;
+      if (!smtp || !smtp.isVerified || smtp.status !== 'Active') {
+        // According to requirements, SMTP must be verified
+        results.push({ id: email.id, status: 'skipped', reason: 'SMTP not verified' });
+        continue;
+      }
 
-      // Check if lead replied or unsubscribed to prevent sending
-      if (email.lead.status === 'Replied' || email.lead.status === 'Unsubscribed') {
+      // Check if lead replied, unsubscribed, or booked a call to prevent sending (extra safety check though DB query filters it)
+      if (email.lead.status === 'Replied' || email.lead.status === 'Unsubscribed' || email.lead.status === 'Booked') {
         await prisma.emailSequence.update({
           where: { id: email.id },
           data: { status: 'Stopped', timingReason: `Stopped due to lead status: ${email.lead.status}` }

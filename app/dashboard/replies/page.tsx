@@ -31,6 +31,34 @@ export default function RepliesPage() {
     } catch(e) { console.error(e) }
   };
 
+  const handleBookSlot = async (reply: any, slot: any) => {
+    try {
+      const res = await fetch('/api/integrations/google-calendar/book', {
+        method: 'POST',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start: slot.start,
+          end: slot.end,
+          summary: `Discovery Call with ${reply.lead?.businessName || reply.lead?.email}`,
+          description: `Booked from Funnelzen AI Campaign: ${reply.campaign?.name}`,
+          attendeeEmail: reply.lead?.email,
+          replyId: reply.id,
+          leadId: reply.lead?.id,
+          campaignId: reply.campaign?.id
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert('Meeting booked successfully on Google Calendar!');
+        await fetchReplies();
+      } else {
+        alert(data.error || 'Failed to book meeting.');
+      }
+    } catch (e) {
+      alert('An error occurred while booking the meeting.');
+    }
+  };
+
   const getCategoryBadge = (category: string) => {
     switch(category) {
       case 'Interested':
@@ -43,6 +71,8 @@ export default function RepliesPage() {
         return <span className="px-2 py-1 bg-red-500/20 text-red-400 text-xs rounded border border-red-500/30 font-medium">Unsubscribe</span>;
       case 'Angry Reply':
         return <span className="px-2 py-1 bg-red-600/20 text-red-500 text-xs rounded border border-red-600/30 font-medium">Angry</span>;
+      case 'Booked':
+        return <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs rounded border border-green-500/30 font-medium flex items-center space-x-1"><Calendar size={12}/><span>Call Booked</span></span>;
       default:
         return <span className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded border border-purple-500/30 font-medium">{category || 'Unknown'}</span>;
     }
@@ -55,6 +85,23 @@ export default function RepliesPage() {
           <h2 className="text-3xl font-bold text-white mb-2">Replies Inbox</h2>
           <p className="text-slate-400">Review incoming replies triaged by AI.</p>
         </div>
+        <button 
+          onClick={async () => {
+            const res = await fetch('/api/leads');
+            const data = await res.json();
+            const lead = data.leads?.[0];
+            if (!lead) return alert('No leads available to simulate reply.');
+            const sim = await fetch('/api/debug/simulate-reply', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ leadId: lead.id, body: "Yes, I’m interested. Can we talk this week?" })
+            });
+            if (sim.ok) { alert('Reply simulated successfully!'); fetchReplies(); }
+            else { const e = await sim.json(); alert(e.error || 'Failed to simulate'); }
+          }}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
+        >
+          Simulate Demo Reply
+        </button>
       </div>
 
       <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex items-start space-x-3 text-blue-400">
@@ -117,11 +164,32 @@ export default function RepliesPage() {
                       <span>AI Suggested Response</span>
                     </div>
                     <p className="text-sm text-purple-200/80 whitespace-pre-wrap">{reply.aiSuggestedReply}</p>
+                    
+                    {reply.suggestedCalendarSlots && reply.suggestedCalendarSlots.length > 0 && (
+                      <div className="mt-4 pt-3 border-t border-purple-500/20">
+                        <p className="text-xs text-purple-300 mb-2 font-semibold">Suggested Meeting Times:</p>
+                        <div className="space-y-2">
+                          {reply.suggestedCalendarSlots.map((slot: any) => (
+                            <div key={slot.id} className="flex justify-between items-center bg-purple-900/20 p-2 rounded border border-purple-500/30">
+                              <span className="text-sm text-purple-200">{slot.label}</span>
+                              <button 
+                                onClick={() => handleBookSlot(reply, slot)}
+                                disabled={slot.selected || reply.aiCategory === 'Booked'}
+                                className="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs rounded transition-colors"
+                              >
+                                {slot.selected ? 'Selected' : 'Book Manually'}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="mt-3 flex space-x-2">
                        <button className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded transition-colors">
                          Edit & Send Reply (Coming Soon)
                        </button>
-                       <span className="text-xs text-slate-500 mt-2 italic">Recommendation: {reply.recommendedAction}</span>
+                       {reply.recommendedAction && <span className="text-xs text-slate-500 mt-2 italic">Recommendation: {reply.recommendedAction}</span>}
                     </div>
                   </div>
                 )}

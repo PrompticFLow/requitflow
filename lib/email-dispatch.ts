@@ -79,9 +79,7 @@ export async function sendCampaignEmail({
   if (emailSequence.status === 'Sent') {
     return { success: false, error: "Email has already been sent." };
   }
-  if (emailSequence.approvalStatus === 'Rejected') {
-    return { success: false, error: "Email sequence has been rejected." };
-  }
+
   if (!subject || subject.trim() === '') {
     return { success: false, error: "Email subject cannot be empty." };
   }
@@ -94,16 +92,12 @@ export async function sendCampaignEmail({
   if (!to || !emailRegex.test(to)) {
     return { success: false, error: "Lead email address is invalid." };
   }
-  if (lead.status === 'Unsubscribed') {
-    return { success: false, error: "Cannot send to an unsubscribed lead." };
-  }
   
-  // Unsubscribe list check
-  const isUnsub = await prisma.unsubscribeList.findUnique({
-    where: { userId_email: { userId: user.id, email: to } }
-  });
-  if (isUnsub) {
-    return { success: false, error: "Lead has unsubscribed and is on the global unsubscribe list." };
+  // Use centralized anti-ban and safety checks
+  const { canSendEmail } = require('./email/can-send-email');
+  const safetyCheck = await canSendEmail(user.id, lead.id, campaign.id);
+  if (!safetyCheck.canSend) {
+    return { success: false, error: safetyCheck.reason };
   }
 
   // Check if User has their own verified SMTP
@@ -131,23 +125,17 @@ export async function sendCampaignEmail({
     try {
       const password = decryptSmtpPass(smtpAccount.smtpPassEncrypted);
 
+      const username = decryptSmtpPass(smtpAccount.smtpUserEncrypted);
+
       const transporter = nodemailer.createTransport({
         host: smtpAccount.smtpHost,
         port: smtpAccount.smtpPort,
         secure: smtpAccount.secure,
         auth: {
-          user: smtpAccount.smtpUserEncrypted, // Actually stores plaintext username since it was originally encrypted but the request says smtpUsername required. Wait, schema says smtpUserEncrypted! I need to decrypt it too. Let's fix that below!
+          user: username,
           pass: password
         }
       });
-
-      // Fix: the username might be encrypted if we encrypted it, but the requirements said "SMTP password must be encrypted", it didn't explicitly say username. However the schema says smtpUserEncrypted, so we should decrypt both. Let's just decrypt both to be safe.
-      const username = decryptSmtpPass(smtpAccount.smtpUserEncrypted);
-
-      transporter.options.auth = {
-        user: username,
-        pass: password
-      };
 
       const mailOptions = {
         from: `"${smtpAccount.fromName}" <${smtpAccount.fromEmail}>`,
@@ -208,4 +196,183 @@ export async function sendCampaignEmail({
   }
 
   return { success: false, error: "No valid sending method found." };
+}
+
+export interface ProcessDueEmailsOptions {
+  userId?: string;
+  limit?: number;
+}
+
+export async function processDueEmails({ userId, limit }: ProcessDueEmailsOptions = {}) {
+  const now = new Date();
+  
+  // Build query where clause
+  const whereClause: any = {
+    status: 'Queued',
+    approvalStatus: 'Approved',
+    scheduledAt: { lte: now },
+    campaign: { status: 'Active' }
+  };
+  
+  if (userId) {
+    whereClause.userId = userId;
+  }
+  
+  const dueEmails = await prisma.emailSequence.findMany({
+    where: whereClause,
+    take: limit || 25,
+    include: {
+      campaign: true,
+      user: true,
+      lead: true
+    },
+    orderBy: {
+      scheduledAt: 'asc'
+    }
+  });
+
+  let processedCount = 0;
+  let sentCount = 0;
+  let failedCount = 0;
+  const userSendCounts: Record<string, number> = {};
+
+  for (const email of dueEmails) {
+    try {
+      const { campaign, user, lead } = email;
+      
+      // 1. Check Unsubscribed
+      const isUnsub = await prisma.unsubscribeList.findUnique({
+        where: { userId_email: { userId: user.id, email: lead.email || '' } }
+      });
+      if (isUnsub || lead.status === 'Unsubscribed') {
+        await prisma.emailSequence.update({
+          where: { id: email.id },
+          data: { status: 'Cancelled', errorMessage: 'Lead is unsubscribed' }
+        });
+        processedCount++;
+        continue;
+      }
+
+      // 2. Check if Lead Replied or Booked
+      if (lead.status === 'Booked' || lead.status === 'Not Interested' || lead.status === 'Replied' || lead.status === 'Bounced') {
+        await prisma.emailSequence.update({
+          where: { id: email.id },
+          data: { status: 'Cancelled', errorMessage: `Lead status is ${lead.status}` }
+        });
+        processedCount++;
+        continue;
+      }
+
+      // Check EmailReply table for safety
+      const hasReply = await prisma.emailReply.findFirst({
+        where: { leadId: lead.id, campaignId: campaign.id }
+      });
+      if (hasReply) {
+        await prisma.emailSequence.update({
+          where: { id: email.id },
+          data: { status: 'Cancelled', errorMessage: 'Stopped because lead replied.' }
+        });
+        processedCount++;
+        continue;
+      }
+
+      // 3. Check Limits
+      if (!userSendCounts[user.id]) userSendCounts[user.id] = 0;
+      if (userSendCounts[user.id] >= 10) continue; // Max 10 per user run/day
+      if (campaign.dailyLimit && userSendCounts[user.id] >= campaign.dailyLimit) continue;
+      
+      // Ensure delay is respected (check last sent email time for this campaign)
+      if (campaign.sendDelaySeconds) {
+        const lastSent = await prisma.emailSequence.findFirst({
+          where: { campaignId: campaign.id, status: 'Sent' },
+          orderBy: { sentAt: 'desc' }
+        });
+        if (lastSent && lastSent.sentAt) {
+          const minNextSend = new Date(lastSent.sentAt.getTime() + campaign.sendDelaySeconds * 1000);
+          if (now < minNextSend) continue; // Skip for now
+        }
+      }
+
+      // Double-check: Make sure the email isn't already sent or isn't Queued
+      // This protects against race conditions if process-due is run in parallel
+      const freshSeq = await prisma.emailSequence.findUnique({
+        where: { id: email.id }
+      });
+      if (!freshSeq || freshSeq.status !== 'Queued' || freshSeq.sentAt !== null) {
+        continue;
+      }
+
+      // 4. Send Email using our existing sendCampaignEmail function
+      processedCount++;
+      const result = await sendCampaignEmail({
+        to: lead.email || '',
+        subject: email.subject,
+        html: email.body, // plain text or HTML body
+        campaignId: campaign.id,
+        leadId: lead.id,
+        emailSequenceId: email.id
+      });
+
+      if (result.success) {
+        // Success
+        await prisma.emailSequence.update({
+          where: { id: email.id },
+          data: {
+            status: 'Sent',
+            sentAt: new Date(),
+            errorMessage: null
+          }
+        });
+
+        // Log sent
+        await prisma.emailSendLog.create({
+          data: {
+            campaignId: campaign.id,
+            leadId: lead.id,
+            emailSequenceId: email.id,
+            subject: email.subject,
+            body: email.body,
+            status: 'Sent'
+          }
+        });
+
+        sentCount++;
+        userSendCounts[user.id]++;
+      } else {
+        // Failed
+        await prisma.emailSequence.update({
+          where: { id: email.id },
+          data: {
+            status: 'Failed',
+            errorMessage: result.error || 'Send failed'
+          }
+        });
+
+        // Log failed send
+        await prisma.emailSendLog.create({
+          data: {
+            campaignId: campaign.id,
+            leadId: lead.id,
+            emailSequenceId: email.id,
+            subject: email.subject,
+            body: email.body,
+            status: 'Failed'
+          }
+        });
+
+        failedCount++;
+      }
+
+    } catch (err: any) {
+      console.error('Failed to process single email:', err);
+      failedCount++;
+    }
+  }
+
+  return {
+    success: true,
+    processed: processedCount,
+    sent: sentCount,
+    failed: failedCount
+  };
 }

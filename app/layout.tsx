@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "FunnelZen AI",
-  description: "Find hiring businesses. Score leads. Send AI-powered outreach. Book more calls.",
+  description: "Find businesses. Score leads. Send AI-powered outreach. Book more calls.",
   icons: {
     icon: "/logo.svg",
     apple: "/logo.svg",

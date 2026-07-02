@@ -14,7 +14,7 @@ export async function GET(req: Request) {
     const search = searchParams.get('search');
     const spamRisk = searchParams.get('spamRisk');       // High
 
-    const where: any = { userId: user.id };
+    const where: any = { userId: user.id, deletedAt: null };
 
     if (campaignId && campaignId !== 'All') {
       where.campaignId = campaignId;

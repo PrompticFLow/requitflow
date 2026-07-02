@@ -90,7 +90,7 @@ export default function JobSearchPage() {
           Job & Hiring Research
         </h1>
         <p className="text-slate-400 mt-2">
-          Search active job openings and discover companies that may need recruitment, staffing, or candidate sourcing support.
+          Search active job openings and discover companies that may need B2B services, software, or support.
         </p>
       </div>
 

@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -9,6 +10,7 @@ import {
 } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
 
@@ -21,24 +23,43 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   };
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <div className="flex h-screen bg-black">
+        <aside className="w-64 border-r border-white/10 bg-slate-950/80" />
+        <main className="flex-1">
+          <header className="h-20 border-b border-white/10 bg-slate-950/80" />
+          <div className="p-6">
+            <div className="h-8 w-64 animate-pulse rounded bg-white/10" />
+            <div className="mt-4 h-64 animate-pulse rounded-xl bg-white/5" />
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   const navItems = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { name: "Find Client Leads", href: "/dashboard/generate-leads", icon: UserPlus },
     // { name: "Job & Hiring Search", href: "/dashboard/job-search", icon: Search },
-    { name: "Companies Hiring", href: "/dashboard/companies-hiring", icon: Search },
+    { name: "Person Leads", href: "/dashboard/person-leads", icon: Search },
     // { name: "Search Candidates", href: "/dashboard/search-candidates", icon: Search },
     { name: "Client Lead Database", href: "/dashboard/leads", icon: Users },
-    { name: "Candidate Database", href: "/dashboard/candidates", icon: Users },
+    // { name: "Candidate Database (Old)", href: "/dashboard/candidates", icon: Users },
     // { name: "Saved Jobs", href: "/dashboard/saved-jobs", icon: BookOpen },
     // { name: "Applied Jobs", href: "/dashboard/applied-jobs", icon: KanbanSquare },
     // { name: "Resume Match", href: "/dashboard/resume-match", icon: Users },
-    // { name: "Recruitment Campaigns", href: "/dashboard/campaigns", icon: Send },
+    // { name: "Campaigns", href: "/dashboard/campaigns", icon: Send },
     { name: "AI Email Agent", href: "/dashboard/ai-email-agent", icon: MessageSquare },
     // { name: "SMS Outreach", href: "/dashboard/sms-outreach", icon: MessageSquare },
     { name: "Replies Inbox", href: "/dashboard/replies", icon: MessageSquare },
     { name: "Booked Calls", href: "/dashboard/booked-calls", icon: PhoneCall },
     { name: "Knowledge Base", href: "/dashboard/knowledge-base", icon: BookOpen },
-    { name: "Recruitment Pipeline", href: "/dashboard/pipeline", icon: KanbanSquare },
+    // { name: "Sales Pipeline", href: "/dashboard/pipeline", icon: KanbanSquare },
     { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
     { name: "Calendar", href: "/dashboard/calendar", icon: Calendar },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
@@ -78,6 +99,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </nav>
         <div className="p-4 mt-auto">
           <button 
+            suppressHydrationWarning
             onClick={handleLogout}
             className="flex w-full items-center space-x-3 px-4 py-3 rounded-xl text-slate-400 hover:bg-red-500/10 hover:text-red-400 transition-all duration-200"
           >
@@ -94,13 +116,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="flex items-center bg-slate-900 border border-slate-800 rounded-full px-4 py-2 w-96">
             <Search size={18} className="text-slate-400" />
             <input 
+              suppressHydrationWarning
               type="text" 
-              placeholder="Search leads, campaigns..." 
+              placeholder="Search people, emails, companies, campaigns..." 
               className="bg-transparent border-none outline-none ml-3 w-full text-sm text-white placeholder-slate-500"
             />
           </div>
           <div className="flex items-center space-x-6">
-            <button className="relative text-slate-400 hover:text-white transition">
+            <button suppressHydrationWarning className="relative text-slate-400 hover:text-white transition">
               <Bell size={20} />
               <span className="absolute top-0 right-0 w-2 h-2 bg-blue-500 rounded-full"></span>
             </button>
@@ -111,10 +134,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </div>
               </div>
             </div>
-            <Link href="/dashboard/generate-leads">
-              <button className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-full font-medium transition-all shadow-lg shadow-blue-500/25">
-                Generate Leads
-              </button>
+            <Link href="/dashboard/generate-leads" className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-full font-medium transition-all shadow-lg shadow-blue-500/25">
+              Generate Leads
             </Link>
           </div>
         </header>

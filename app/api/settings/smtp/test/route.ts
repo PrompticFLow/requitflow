@@ -3,18 +3,27 @@ import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
 import nodemailer from 'nodemailer';
+import { mapSmtpError } from '@/lib/smtp-errors';
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
+    if (!process.env.SMTP_ENCRYPTION_KEY) {
+      return NextResponse.json({ success: false, error: 'SMTP encryption key is missing. Please configure SMTP_ENCRYPTION_KEY.' }, { status: 500 });
+    }
+
     const account = await prisma.smtpAccount.findUnique({
       where: { userId: user.id }
     });
 
     if (!account) {
       return NextResponse.json({ error: 'No SMTP settings found to test.' }, { status: 404 });
+    }
+
+    if (!account.smtpHost || !account.smtpPort || !account.smtpUserEncrypted || !account.smtpPassEncrypted || !account.fromEmail) {
+      return NextResponse.json({ error: 'Missing required SMTP fields. Please provide host, port, username, password, and sender email.' }, { status: 400 });
     }
 
     const password = decryptSmtpPass(account.smtpPassEncrypted);
@@ -28,6 +37,9 @@ export async function POST(req: Request) {
         user: username,
         pass: password,
       },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 10000
     });
 
     try {
@@ -53,7 +65,13 @@ export async function POST(req: Request) {
 
       return NextResponse.json({ success: true, message: 'SMTP connection successful! A test email has been sent.' });
     } catch (verifyError: any) {
-      console.error("SMTP Verify Error:", verifyError.message);
+      console.error("SMTP test failed:", {
+        name: verifyError?.name,
+        code: verifyError?.code,
+        command: verifyError?.command,
+        responseCode: verifyError?.responseCode,
+        message: verifyError?.message,
+      });
       
       // Mark as unverified
       await prisma.smtpAccount.update({
@@ -61,7 +79,9 @@ export async function POST(req: Request) {
         data: { isVerified: false, status: 'Failed' }
       });
 
-      return NextResponse.json({ error: 'SMTP connection failed. Please check host, port, username, and password.' }, { status: 400 });
+      let friendlyError = mapSmtpError(verifyError);
+
+      return NextResponse.json({ error: friendlyError }, { status: 400 });
     }
 
   } catch (error: any) {

@@ -1,85 +1,166 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
-import { checkCampaignReadyToStart } from '@/lib/campaign-ready';
+import { calculateScheduledAt } from '@/lib/email-scheduling';
+import { processDueEmails } from '@/lib/email-dispatch';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const { id } = await params;
-
   try {
-    // Verify campaign ownership
-    const campaign = await prisma.campaign.findUnique({ where: { id } });
-    if (!campaign) return NextResponse.json({ error: 'Campaign not found.' }, { status: 404 });
-    if (campaign.userId !== user.id) return NextResponse.json({ error: 'Access denied.' }, { status: 403 });
-
-    if (campaign.status === 'Active') {
-      return NextResponse.json({ error: 'This campaign is already active.' }, { status: 400 });
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Backend readiness check — source of truth
-    const readyCheck = await checkCampaignReadyToStart(id, user.id);
+    const { id: campaignId } = await params;
+    
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: {
+        campaignLeads: true,
+        emailSequences: true,
+      }
+    });
 
-    if (!readyCheck.ready) {
+    if (!campaign || campaign.userId !== user.id) {
+      return NextResponse.json({ error: 'Campaign not found.' }, { status: 404 });
+    }
+
+    const userSettings = await prisma.userSettings.findUnique({
+      where: { userId: user.id }
+    });
+
+    const smtpAccount = await prisma.smtpAccount.findUnique({
+      where: { userId: user.id }
+    });
+
+    // Check Sender Verification
+    const hasVerifiedSmtp = smtpAccount && smtpAccount.isVerified;
+    const hasVerifiedSendGrid = !!(process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM_EMAIL);
+
+    if (!hasVerifiedSmtp && !hasVerifiedSendGrid) {
       return NextResponse.json({
         success: false,
-        error: 'Your campaign is not ready yet. Please complete the missing items.',
-        items: readyCheck.items,
-        missingRequirements: readyCheck.missingRequirements
+        error: "Sender email is not verified. Please verify SMTP before starting this campaign."
       }, { status: 400 });
     }
 
-    // Fetch user's SMTP delay setting
-    const smtpAccount = await prisma.smtpAccount.findUnique({ where: { userId: user.id } });
-    const delaySeconds = smtpAccount?.delayBetweenEmailsSeconds || 120;
+    const missing: string[] = [];
 
-    // Schedule approved Step 1 emails for non-unsubscribed leads
-    const sequencesToSchedule = await prisma.emailSequence.findMany({
-      where: {
-        campaignId: id,
-        sequenceStep: 1,
-        approvalStatus: 'Approved',
-        status: 'Draft',
-        lead: { status: { not: 'Unsubscribed' } }
-      }
-    });
+    if (!campaign.bookingLink && !userSettings?.bookingLink) {
+      missing.push('Booking link is missing');
+    }
 
-    if (sequencesToSchedule.length > 0) {
-      let now = new Date();
-      for (let i = 0; i < sequencesToSchedule.length; i++) {
-        const sequence = sequencesToSchedule[i];
-        const scheduledTime = new Date(now.getTime() + (i * delaySeconds * 1000));
-        await prisma.emailSequence.update({
-          where: { id: sequence.id },
-          data: { 
-            status: 'Scheduled',
-            scheduledAt: scheduledTime
-          }
-        });
+    if (!campaign.unsubscribeLine) {
+      missing.push('Unsubscribe line is missing');
+    }
+
+    if (!campaign.campaignLeads || campaign.campaignLeads.length === 0) {
+      missing.push('No leads selected');
+    }
+    
+    // Check if 5 emails are generated
+    const leads = campaign.campaignLeads.map((cl: any) => cl.leadId);
+    const sequences = campaign.emailSequences || [];
+    
+    for (const leadId of leads) {
+      const leadSequences = sequences.filter((s: any) => s.leadId === leadId);
+      if (leadSequences.length < 5) {
+        missing.push(`5 email drafts not generated for lead ${leadId}`);
+        break;
       }
     }
 
-    const updatedCampaign = await prisma.campaign.update({
-      where: { id },
-      data: { status: 'Active' }
+    // Check if Email 1 is approved for all leads in the campaign
+    const approvedEmail1s = sequences.filter((s: any) => s.sequenceStep === 1 && s.approvalStatus === 'Approved');
+    if (approvedEmail1s.length < leads.length) {
+      return NextResponse.json({
+        success: false,
+        error: "Email 1 is not approved. Please approve Email 1 before starting the campaign."
+      }, { status: 400 });
+    }
+
+    if (!campaign.dailyLimit || campaign.dailyLimit < 1) {
+      missing.push('Daily sending limit is not configured');
+    }
+
+    if (!campaign.timezoneMode) {
+      missing.push('Campaign sending timezone is missing');
+    }
+
+    if (!campaign.timingMode) {
+      missing.push('Campaign sending schedule settings are missing');
+    }
+
+    if (missing.length > 0) {
+      return NextResponse.json({
+        success: false,
+        error: 'Campaign is not ready to start.',
+        missing
+      }, { status: 400 });
+    }
+
+    // Mark campaign as Active and record start time
+    const now = new Date();
+    await prisma.campaign.update({
+      where: { id: campaignId },
+      data: {
+        status: 'Active',
+        startedAt: now
+      }
     });
 
-    // Fire and forget — trigger email sending worker
-    const origin = req.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    fetch(`${origin}/api/campaigns/${id}/process-due-emails`, {
-      method: 'POST',
-      headers: { cookie: req.headers.get('cookie') || '' }
-    }).catch(console.error);
+    // Schedule emails
+    let queuedCount = 0;
+    
+    // Process each lead's sequence
+    for (const leadId of leads) {
+      const leadSequences = sequences.filter((s: any) => s.leadId === leadId);
+      
+      for (const seq of leadSequences) {
+        // Only schedule/queue if approved
+        if (seq.approvalStatus === 'Approved') {
+          let scheduledDate: Date;
+          if (seq.sequenceStep === 1) {
+            // Email 1 is queued to send immediately (scheduledAt = now)
+            scheduledDate = now;
+          } else {
+            const delayDays = seq.delayAmount || (seq.sequenceStep === 2 ? 2 : seq.sequenceStep === 3 ? 5 : seq.sequenceStep === 4 ? 8 : 12);
+            scheduledDate = calculateScheduledAt({
+              campaignStartDate: now,
+              delayDays,
+              sendWindowStart: campaign.sendingWindowStart,
+              sendWindowEnd: campaign.sendingWindowEnd,
+              timezone: campaign.timezoneMode,
+              mode: campaign.timingMode,
+              skipWeekends: !campaign.weekendsEnabled
+            });
+          }
+
+          await prisma.emailSequence.update({
+            where: { id: seq.id },
+            data: {
+              status: 'Queued',
+              scheduledAt: scheduledDate,
+            }
+          });
+          queuedCount++;
+        }
+      }
+    }
+
+    // Trigger immediate send of queued Email 1s
+    const processResult = await processDueEmails({ userId: user.id });
 
     return NextResponse.json({
       success: true,
-      campaign: updatedCampaign,
-      scheduledCount: sequencesToSchedule.length
+      message: 'Campaign started. Email 1 is queued to send immediately.',
+      email1Queued: true,
+      email1Sent: processResult.sent > 0,
+      scheduled: queuedCount
     });
+
   } catch (error: any) {
-    console.error('Start campaign error:', error);
-    return NextResponse.json({ error: 'Something went wrong while starting the campaign. Please try again.' }, { status: 500 });
+    console.error('Campaign start error:', error);
+    return NextResponse.json({ error: 'Failed to start campaign' }, { status: 500 });
   }
 }

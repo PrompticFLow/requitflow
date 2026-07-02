@@ -58,17 +58,23 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     const updateData: any = {};
     const editableFields = [
-      'name', 'campaignType', 'targetAudience', 'industry', 'offer',
-      'goal', 'tone', 'language', 'ctaType', 'ctaLink', 'bookingLink',
+      'name', 'campaignType', 'targetAudience', 'targetIndustry', 'targetCompanyType',
+      'targetRoles', 'targetMarket', 'industry', 'offer', 'location', 'followUpStyle',
+      'goal', 'tone', 'language', 'ctaType', 'ctaText', 'ctaLink', 'bookingLink',
+      'bookingMethod', 'bookingLinkStrategy',
       'senderName', 'agencyName', 'emailSignature', 'status', 'sendingMode',
-      'problemSolved', 'mainBenefit', 'proofCaseStudy', 'unsubscribeLine', 'senderEmail',
+      'problemSolved', 'mainBenefit', 'uniqueMechanism', 'proofCaseStudy', 
+      'painPoints', 'desiredOutcome', 'objections', 'avoidSaying',
+      'unsubscribeLine', 'senderEmail',
       'dailyLimit', 'followUpCount',
       'timingMode', 'timezoneMode', 'allowedSendingDays', 'sendingWindowStart',
       'sendingWindowEnd', 'weekendsEnabled', 'skipHolidays', 'autoApproveEmails',
       'autoSendApprovedEmails', 'bookingAutomationMode', 'meetingType',
       'meetingDuration', 'minimumBookingNotice', 'maximumBookingHorizon',
       'autoCreateCalendarEvent', 'autoSendBookingConfirmation',
-      'knowledgeBaseMode', 'selectedKnowledgeBaseFileIds'
+      'knowledgeBaseMode', 'selectedKnowledgeBaseFileIds',
+      'personalizationLevel', 'personalizationStyle', 'mentionCompanyName',
+      'companyFallback', 'useKnowledgeBase', 'emailLength', 'spamSafety', 'ctaStyle'
     ];
 
     for (const field of editableFields) {

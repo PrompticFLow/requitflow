@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { generateSevenStepSequence } from '@/lib/campaign-generator';
 import { recommendNextSendTime } from '@/lib/scheduling';
+import { calculateBestSendTime } from '@/lib/email/best-send-time';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -64,17 +65,41 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           let baseDate = new Date();
           
           for (const step of sequence) {
-            // Calculate recommended timing
-            const { scheduledAt, reason } = recommendNextSendTime(
-              baseDate,
-              step.delayAmount,
-              step.delayUnit,
-              campaign.timezoneMode,
-              campaign.allowedSendingDays ? JSON.parse(campaign.allowedSendingDays) : ['Mon','Tue','Wed','Thu','Fri'],
-              campaign.sendingWindowStart || '09:00',
-              campaign.sendingWindowEnd || '16:00',
-              campaign.skipHolidays
-            );
+            let scheduledAt: Date;
+            let reason: string;
+            let scheduledTimezone: string | undefined;
+            let bestSendReason: string | undefined;
+            let sendWindow: string | undefined;
+
+            if (campaign.useAiBestTime) {
+              const bestTime = calculateBestSendTime({
+                leadLocation: lead.location || lead.country,
+                campaignLocation: campaign.location || campaign.country,
+                targetAudience: campaign.targetAudience,
+                stepNumber: step.step,
+                delayDays: step.delayAmount,
+                lastEmailSentAt: baseDate
+              });
+              scheduledAt = bestTime.sendAt;
+              scheduledTimezone = bestTime.timezone;
+              bestSendReason = bestTime.reason;
+              sendWindow = bestTime.sendWindow;
+              reason = bestTime.reason;
+            } else {
+              // Calculate recommended timing fallback
+              const result = recommendNextSendTime(
+                baseDate,
+                step.delayAmount,
+                step.delayUnit,
+                campaign.timezoneMode,
+                campaign.allowedSendingDays ? JSON.parse(campaign.allowedSendingDays) : ['Mon','Tue','Wed','Thu','Fri'],
+                campaign.sendingWindowStart || '09:00',
+                campaign.sendingWindowEnd || '16:00',
+                campaign.skipHolidays
+              );
+              scheduledAt = result.scheduledAt;
+              reason = result.reason;
+            }
 
             await prisma.emailSequence.create({
               data: {
@@ -92,7 +117,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
                 delayUnit: step.delayUnit,
                 recommendedSendAt: scheduledAt,
                 scheduledAt: scheduledAt,
+                scheduledTimezone: scheduledTimezone,
                 timingReason: reason,
+                bestSendReason: bestSendReason,
+                sendWindow: sendWindow,
                 knowledgeBaseSources: JSON.stringify(step.knowledgeBaseSources || []),
                 personalizationReason: step.personalizationReason,
                 status: 'Draft',

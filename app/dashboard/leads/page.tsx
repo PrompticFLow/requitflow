@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import Link from 'next/link';
 import { Search, Filter, Download, Plus, Trash2, Loader2, Users, X, ChevronDown } from "lucide-react";
 
 export default function LeadDatabasePage() {
@@ -175,6 +176,18 @@ export default function LeadDatabasePage() {
 
   const handleAddToCampaign = async () => {
     if (!selectedCampaignId) return alert('Please select a campaign.');
+    
+    // Check for missing emails
+    const selectedLeads = leads.filter(l => selectedIds.has(l.id));
+    const missingEmailCount = selectedLeads.filter(l => !l.email).length;
+    
+    if (missingEmailCount > 0) {
+      const proceed = window.confirm(
+        `Warning: ${missingEmailCount} of the selected leads do not have email addresses. They can be added, but email sending will be skipped until enrichment is completed.\n\nDo you want to proceed?`
+      );
+      if (!proceed) return;
+    }
+    
     setAddingToCampaign(true);
     try {
       const res = await fetch('/api/campaigns/add-leads', {
@@ -247,7 +260,7 @@ export default function LeadDatabasePage() {
       <div className="flex justify-between items-end">
         <div>
           <h2 className="text-3xl font-bold text-white mb-2">Client Lead Database</h2>
-          <p className="text-slate-400">View and manage all generated client leads across recruitment campaigns.</p>
+          <p className="text-slate-400">View and manage all generated client leads across campaigns.</p>
         </div>
         <div className="flex space-x-3">
           <button
@@ -429,7 +442,11 @@ export default function LeadDatabasePage() {
                       />
                     </td>
                     <td className="px-6 py-4 font-medium text-white">
-                      <div>{lead.name}</div>
+                      <div>
+                        <Link href={`/dashboard/leads/${lead.id}`} className="hover:text-blue-400 transition-colors">
+                          {lead.name}
+                        </Link>
+                      </div>
                       {lead.category && <div className="text-[10px] text-slate-500 mt-0.5">{lead.category}</div>}
                     </td>
                     <td className="px-6 py-4">
@@ -517,6 +534,15 @@ export default function LeadDatabasePage() {
               <p className="text-slate-300 text-sm">
                 You are adding <span className="font-bold text-white">{selectedIds.size}</span> selected {selectedIds.size === 1 ? 'lead' : 'leads'} to a campaign.
               </p>
+              {Array.from(selectedIds).filter(id => {
+                const lead = filtered.find(l => l.id === id);
+                return lead && !lead.email;
+              }).length > 0 && (
+                <div className="bg-yellow-500/10 border border-yellow-500/30 p-3 rounded-lg text-yellow-400 text-xs flex gap-2 items-start">
+                  <span className="shrink-0">⚠️</span>
+                  <p>Some leads do not have an email address yet. Enrich contact details before starting email outreach.</p>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-1">Select Campaign</label>
                 <select

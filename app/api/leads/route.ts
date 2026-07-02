@@ -13,27 +13,40 @@ export async function GET(req: Request) {
   if (campaignId) {
     whereClause.campaignId = campaignId;
   }
+  const source = url.searchParams.get('source');
+  if (source) {
+    whereClause.source = source;
+  }
 
-  const leads = await prisma.lead.findMany({
-    where: whereClause,
-    orderBy: { createdAt: 'desc' }
-  });
+  try {
+    const leads = await prisma.lead.findMany({
+      where: whereClause,
+      orderBy: { createdAt: 'desc' }
+    });
 
-  return NextResponse.json({ leads });
+    return NextResponse.json({ leads });
+  } catch (err: any) {
+    console.error("Leads API error:", err);
+    return NextResponse.json({ error: "Failed to load leads" }, { status: 500 });
+  }
 }
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const data = await req.json();
+  try {
+    const data = await req.json();
 
-  const lead = await prisma.lead.create({
-    data: {
-      ...data,
-      userId: user.id,
-    }
-  });
+    const lead = await prisma.lead.create({
+      data: {
+        ...data,
+        userId: user.id,
+      }
+    });
 
-  return NextResponse.json({ lead });
+    return NextResponse.json({ lead });
+  } catch (err: any) {
+    return NextResponse.json({ error: "Failed to create lead" }, { status: 500 });
+  }
 }

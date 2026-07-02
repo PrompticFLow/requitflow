@@ -1,19 +1,27 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import { Loader2, Mail, Users, BarChart3, Settings, MessageSquare, Check, RefreshCw, Save, Send, AlertTriangle, Calendar, Clock, Edit3, BookOpen } from "lucide-react";
+import Link from "next/link";
+import { Loader2, Mail, Users, BarChart3, Settings, MessageSquare, Check, RefreshCw, Save, Send, AlertTriangle, Calendar, Clock, Edit3, BookOpen, CheckCircle2, X, Search } from "lucide-react";
+import { buildLeadPersonalization } from "@/lib/lead-personalization";
 
 export default function CampaignDetailPage() {
   const params = useParams();
   const campaignId = params.id as string;
   
-  const [activeTab, setActiveTab] = useState("5-Step Sequence");
+  const [activeTab, setActiveTab] = useState("Sequence");
   const [loading, setLoading] = useState(true);
   const [campaignLeads, setCampaignLeads] = useState<any[]>([]);
   const [campaignData, setCampaignData] = useState<any>(null);
   const [generating, setGenerating] = useState(false);
   const [genProgress, setGenProgress] = useState("");
   const [expandedLead, setExpandedLead] = useState<string | null>(null);
+  
+  // Knowledge Base State
+  const [kbFiles, setKbFiles] = useState<any[]>([]);
+  const [uploadingKb, setUploadingKb] = useState(false);
+  const [selectedKbFileIds, setSelectedKbFileIds] = useState<string[]>([]);
+
   
   // Leads Tab State
   const [leadSearch, setLeadSearch] = useState("");
@@ -30,32 +38,69 @@ export default function CampaignDetailPage() {
       }
       
       const campRes = await fetch(`/api/campaigns`); // We need campaign details. Or maybe just use local state for settings
+      
+      const kbRes = await fetch(`/api/knowledge-base`);
+      if (kbRes.ok) {
+        const kbData = await kbRes.json();
+        setKbFiles(kbData.files || []);
+      }
     } catch(e) {
       console.error(e);
     }
     setLoading(false);
   };
 
+  const handleUploadKb = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('campaignId', campaignId);
+    
+    setUploadingKb(true);
+    try {
+      const res = await fetch('/api/knowledge-base/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert("Knowledge file uploaded and ready.");
+        fetchCampaignData();
+      } else {
+        alert(data.error || "Upload failed");
+      }
+    } catch (err) {
+      alert("We could not read this file. Please upload a text-based PDF, DOCX, TXT, CSV, Markdown, or JSON file.");
+    }
+    setUploadingKb(false);
+  };
+
+
   useEffect(() => {
     fetchCampaignData();
   }, [campaignId]);
 
   const handleGenerateSequences = async () => {
-    const leadsWithoutEmails = campaignLeads.filter(cl => !cl.lead.emailSequences || cl.lead.emailSequences.length < 5).map(cl => cl.leadId);
+    const validLeads = campaignLeads.filter(cl => cl.lead.email && cl.lead.emailStatus !== 'Missing');
+    const leadsToGenerate = validLeads.filter(cl => !cl.lead.emailSequences || cl.lead.emailSequences.length < 25).map(cl => cl.leadId);
     
-    if (leadsWithoutEmails.length === 0) {
-      return alert("All leads already have 5-Step email sequences.");
+    if (validLeads.length === 0) {
+      return alert("No leads with valid email addresses found. Please enrich your leads first.");
+    }
+    if (leadsToGenerate.length === 0) {
+      return alert("All leads with email addresses already have 25-Step email sequences.");
     }
 
     setGenerating(true);
     
     const batchSize = 10;
-    for (let i = 0; i < leadsWithoutEmails.length; i += batchSize) {
-      const batch = leadsWithoutEmails.slice(i, i + batchSize);
-      setGenProgress(`Generating 5-Step sequences for leads ${i + 1} to ${Math.min(i + batchSize, leadsWithoutEmails.length)} of ${leadsWithoutEmails.length}...`);
+    for (let i = 0; i < leadsToGenerate.length; i += batchSize) {
+      const batch = leadsToGenerate.slice(i, i + batchSize);
+      setGenProgress(`Generating 25-Step sequences for leads ${i + 1} to ${Math.min(i + batchSize, leadsToGenerate.length)} of ${leadsToGenerate.length}...`);
       
       try {
-        const res = await fetch(`/api/campaigns/${campaignId}/generate-seven-step-sequence`, {
+        const res = await fetch(`/api/campaigns/${campaignId}/generate-email-sequence`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ leadIds: batch })
@@ -163,14 +208,14 @@ export default function CampaignDetailPage() {
     } catch(e) { console.error(e); }
   };
 
-  const tabs = ["Overview", "Leads", "5-Step Sequence", "Timing", "Replies", "Analytics", "Settings"];
+  const tabs = ["Overview", "Leads", "Sequence", "Knowledge Base", "Reviews", "Replies Inbox", "Timing", "Analytics", "Settings"];
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-end">
         <div>
           <h2 className="text-3xl font-bold text-white mb-2">Campaign Details</h2>
-          <p className="text-slate-400">Review leads, manage AI 5-Step sequences, and track performance.</p>
+          <p className="text-slate-400">Review leads, manage AI 25-Step sequences, and track performance.</p>
         </div>
       </div>
 
@@ -190,16 +235,202 @@ export default function CampaignDetailPage() {
         <div className="flex justify-center py-20">
           <Loader2 className="animate-spin text-purple-500" size={40} />
         </div>
-      ) : activeTab === "5-Step Sequence" ? (
+      ) : activeTab === "Overview" ? (
+         <div className="space-y-6 animate-in fade-in">
+           <div className="glass p-8 rounded-2xl border border-slate-700/50">
+             <div className="flex justify-between items-center mb-6">
+               <h3 className="text-xl font-bold text-white flex items-center gap-2">Campaign Overview</h3>
+               <div className="flex space-x-3">
+                 <button 
+                   onClick={async () => {
+                     // Check Readiness
+                     if (campaignLeads.length === 0) return alert("Add leads to this campaign before starting.");
+                     const unapproved = campaignLeads.some(cl => {
+                       const emails = cl.lead.emailSequences || [];
+                       if (emails.length === 0) return true;
+                       return emails.some((e: any) => e.sequenceStep === 1 && e.approvalStatus !== 'Approved');
+                     });
+                     if (unapproved) {
+                       const noEmails = campaignLeads.some(cl => !cl.lead.emailSequences || cl.lead.emailSequences.length === 0);
+                       if (noEmails) return alert("Generate emails for your campaign leads first.");
+                       return alert("Approve Email 1 before starting this campaign.");
+                     }
+                     // Start campaign
+                     try {
+                       const res = await fetch(`/api/campaigns/${campaignId}/start-sending`, { method: "POST" });
+                       const data = await res.json();
+                       if (res.ok) alert("Campaign started! Email 1 is being sent.");
+                       else alert(data.error || "Failed to start campaign.");
+                     } catch(e) { console.error(e); }
+                   }}
+                   className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors font-bold shadow-lg shadow-green-500/20"
+                 >
+                   Start Campaign
+                 </button>
+               </div>
+             </div>
+             
+             {campaignLeads.filter(cl => !cl.lead.email || cl.lead.emailStatus === 'Missing').length > 0 && (
+               <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 p-4 rounded-xl flex items-start gap-3 mb-6">
+                 <AlertTriangle size={20} className="mt-0.5 shrink-0" />
+                 <div>
+                   <p className="font-semibold">{campaignLeads.filter(cl => !cl.lead.email || cl.lead.emailStatus === 'Missing').length} leads are missing email addresses.</p>
+                   <p className="text-sm opacity-90">Enrich contacts on the Candidate Database page before starting an email campaign. Leads without emails will be skipped.</p>
+                 </div>
+               </div>
+             )}
+
+             {/* Readiness Checklist */}
+             <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-6 mb-6">
+               <h4 className="text-white font-bold mb-3 flex items-center gap-2">
+                 <CheckCircle2 size={18} className="text-blue-400" /> Campaign Readiness
+               </h4>
+               <ul className="space-y-2 text-sm text-slate-300">
+                 <li className="flex items-center gap-2">
+                   {campaignLeads.length > 0 ? <Check size={16} className="text-green-500" /> : <X size={16} className="text-red-500" />}
+                   Add leads to campaign
+                 </li>
+                 <li className="flex items-center gap-2">
+                   {campaignLeads.some(cl => cl.lead.emailSequences && cl.lead.emailSequences.length > 0) ? <Check size={16} className="text-green-500" /> : <X size={16} className="text-red-500" />}
+                   Generate AI Email Sequences
+                 </li>
+                 <li className="flex items-center gap-2">
+                   {!campaignLeads.some(cl => {
+                       const emails = cl.lead.emailSequences || [];
+                       if (emails.length === 0) return true;
+                       return emails.some((e: any) => e.sequenceStep === 1 && e.approvalStatus !== 'Approved');
+                     }) && campaignLeads.length > 0 ? <Check size={16} className="text-green-500" /> : <X size={16} className="text-yellow-500" />}
+                   Approve Email 1 for all leads
+                 </li>
+               </ul>
+             </div>
+
+             <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+               <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                 <p className="text-slate-400 text-sm mb-1">Total Leads</p>
+                 <p className="text-2xl font-bold text-white">{campaignLeads.length}</p>
+               </div>
+               <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                 <p className="text-slate-400 text-sm mb-1">Emails Drafted</p>
+                 <p className="text-2xl font-bold text-purple-400">
+                   {campaignLeads.reduce((acc, cl) => acc + (cl.lead.emailSequences?.length || 0), 0)}
+                 </p>
+               </div>
+               <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                 <p className="text-slate-400 text-sm mb-1">Emails Approved</p>
+                 <p className="text-2xl font-bold text-green-400">
+                   {campaignLeads.reduce((acc, cl) => acc + (cl.lead.emailSequences?.filter((e: any) => e.approvalStatus === 'Approved').length || 0), 0)}
+                 </p>
+               </div>
+               <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                 <p className="text-slate-400 text-sm mb-1">Emails Sent</p>
+                 <p className="text-2xl font-bold text-blue-400">
+                   {campaignLeads.reduce((acc, cl) => acc + (cl.lead.emailSequences?.filter((e: any) => e.status === 'Sent').length || 0), 0)}
+                 </p>
+               </div>
+               <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                 <p className="text-slate-400 text-sm mb-1">Replies</p>
+                 <p className="text-2xl font-bold text-orange-400">
+                   {campaignLeads.reduce((acc, cl) => acc + (cl.lead.replies?.length || 0), 0)}
+                 </p>
+               </div>
+               <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                 <p className="text-slate-400 text-sm mb-1">Booked Calls</p>
+                 <p className="text-2xl font-bold text-pink-400">
+                   {campaignLeads.filter(cl => cl.lead.status === 'Booked').length}
+                 </p>
+               </div>
+             </div>
+           </div>
+         </div>
+      ) : activeTab === "Leads" ? (
+         <div className="space-y-6">
+           <div className="flex justify-between items-center bg-slate-900/50 p-6 rounded-2xl border border-slate-700/50">
+             <div>
+               <h3 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
+                 <Users className="text-purple-400" size={20} /> Candidate Database
+               </h3>
+               <p className="text-sm text-slate-400">Leads assigned to this campaign for AI email outreach.</p>
+             </div>
+             <div className="flex space-x-3 items-center">
+               <button 
+                 onClick={() => window.location.href = '/dashboard/person-leads'} 
+                 className="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors shadow-lg shadow-purple-500/25 text-sm font-bold"
+               >
+                 Go to Candidate Database
+               </button>
+             </div>
+           </div>
+
+           {campaignLeads.length === 0 ? (
+             <div className="glass p-12 rounded-2xl border border-slate-700/50 text-center">
+               <h3 className="text-lg text-white mb-2">No leads added yet.</h3>
+               <p className="text-slate-400 text-sm mb-4">Add candidate leads from Candidate Database.</p>
+               <Link href="/dashboard/person-leads" className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-2 mt-auto">
+                    <Search size={16} /> Go to Candidate Database
+               </Link>
+             </div>
+           ) : (
+             <div className="glass rounded-xl border border-slate-800 overflow-hidden overflow-x-auto">
+               <table className="w-full text-left border-collapse min-w-[1200px]">
+                 <thead>
+                   <tr className="bg-slate-900/80 border-b border-slate-800 text-slate-400 text-xs uppercase">
+                     <th className="p-4 font-medium">Name & Role</th>
+                     <th className="p-4 font-medium">Company / Business</th>
+                     <th className="p-4 font-medium">Contact Data</th>
+                     <th className="p-4 font-medium">Location & Industry</th>
+                     <th className="p-4 font-medium">AI Fit Score</th>
+                     <th className="p-4 font-medium">Email Status</th>
+                     <th className="p-4 font-medium">Actions</th>
+                   </tr>
+                 </thead>
+                 <tbody className="text-sm divide-y divide-slate-800/50">
+                   {campaignLeads.map((cl) => {
+                     const lead = cl.lead;
+                     return (
+                       <tr key={lead.id} className="hover:bg-slate-800/50 transition-colors">
+                         <td className="p-4">
+                           <p className="font-bold text-white">{lead.fullName || lead.firstName || 'Unknown Name'}</p>
+                           <p className="text-xs text-slate-400 mt-1">{lead.jobTitle || 'Role Unspecified'}</p>
+                         </td>
+                         <td className="p-4">
+                           <p className="font-medium text-white">{lead.companyName || lead.businessName || 'No company detected'}</p>
+                         </td>
+                         <td className="p-4 space-y-1">
+                           <p className="text-xs text-slate-300">{lead.email || 'No email'}</p>
+                           <p className="text-xs text-slate-300">{lead.phone || 'No phone'}</p>
+                         </td>
+                         <td className="p-4">
+                           <p className="text-xs text-slate-300">{lead.location || 'Unknown'}</p>
+                           <p className="text-xs text-slate-400">{lead.industry || 'General'}</p>
+                         </td>
+                         <td className="p-4">
+                           <span className="text-xs font-bold text-slate-300">{lead.leadScore || 0}/100</span>
+                         </td>
+                         <td className="p-4">
+                           <span className="text-xs px-2 py-1 bg-slate-800 text-slate-300 rounded border border-slate-700">{cl.status || 'Pending'}</span>
+                         </td>
+                         <td className="p-4">
+                           <button className="text-xs text-red-400 hover:text-red-300 transition-colors">Remove</button>
+                         </td>
+                       </tr>
+                     );
+                   })}
+                 </tbody>
+               </table>
+             </div>
+           )}
+         </div>
+      ) : activeTab === "Sequence" ? (
         <div className="space-y-6">
           <div className="flex justify-between items-center bg-slate-900/50 p-6 rounded-2xl border border-slate-700/50">
             <div>
               <h3 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
-                <Mail className="text-purple-400" size={20} /> 5-Step AI Sequences
+                <Mail className="text-purple-400" size={20} /> 25-Step AI Sequences
               </h3>
-              <p className="text-sm text-slate-400">AI generates a full 5-Step sequence leveraging your Knowledge Base.</p>
+              <p className="text-sm text-slate-400">AI generates a full 25-Step sequence spanning 28 days.</p>
               <p className="text-xs text-purple-400 mt-2 font-medium bg-purple-500/10 inline-block px-2 py-1 rounded">
-                Drafts Estimate: {campaignLeads.length} leads × 5 emails = {campaignLeads.length * 5} total drafts
+                Drafts Estimate: {campaignLeads.length} leads × 25 emails = {campaignLeads.length * 25} total drafts
               </p>
             </div>
             <div className="flex space-x-3 items-center">
@@ -215,7 +446,7 @@ export default function CampaignDetailPage() {
                 className="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors shadow-lg shadow-purple-500/25 flex items-center space-x-2 disabled:opacity-50"
               >
                 {generating ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
-                <span>{generating ? "Generating Sequences..." : "Generate Missing 5-Step Sequences"}</span>
+                <span>{generating ? "Generating Sequences..." : "Generate Missing 25-Step Sequences"}</span>
               </button>
             </div>
           </div>
@@ -237,6 +468,7 @@ export default function CampaignDetailPage() {
                 const emails = lead.emailSequences || [];
                 const isExpanded = expandedLead === lead.id;
                 const hasEmails = emails.length > 0;
+                const personalization = buildLeadPersonalization(lead);
 
                 return (
                   <div key={lead.id} className="glass rounded-xl border border-slate-700/50 overflow-hidden">
@@ -249,7 +481,12 @@ export default function CampaignDetailPage() {
                           {i + 1}
                         </div>
                         <div>
-                          <h4 className="text-lg font-bold text-white">{lead.businessName || lead.name}</h4>
+                          <h4 className="text-lg font-bold text-white">
+                            {personalization.safeCompanyMention !== "your team" ? personalization.safeCompanyMention : "No company detected"}
+                          </h4>
+                          <div className="text-sm text-purple-400">
+                            {personalization.firstName ? `First name: ${personalization.firstName}` : "No first name detected"}
+                          </div>
                           <div className="flex space-x-3 text-xs text-slate-400 mt-1">
                             <span>{lead.location || 'Unknown Location'}</span>
                             <span>•</span>
@@ -275,8 +512,8 @@ export default function CampaignDetailPage() {
                       <div className="p-6 border-t border-slate-800 bg-slate-900/30">
                         {!hasEmails ? (
                           <div className="text-center py-10">
-                            <h3 className="text-lg text-white mb-2">No 5-Step sequence generated yet.</h3>
-                            <p className="text-slate-400 text-sm">Click the "Generate Missing 5-Step Sequences" button.</p>
+                            <h3 className="text-lg text-white mb-2">No 25-Step sequence generated yet.</h3>
+                            <p className="text-slate-400 text-sm">Click the "Generate Missing 25-Step Sequences" button.</p>
                           </div>
                         ) : (
                           <div className="space-y-8">
@@ -309,17 +546,143 @@ export default function CampaignDetailPage() {
       ) : activeTab === "Timing" ? (
          <div className="space-y-6">
             <div className="glass p-8 rounded-2xl border border-slate-700/50">
-               <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Clock className="text-purple-400" /> AI Recommended Timing</h3>
+               <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Clock className="text-purple-400" /> AI Best Time Email Sending Settings</h3>
                <p className="text-slate-400 text-sm mb-6">
-                 AI recommends email timing using campaign settings, recipient time zone, and engagement history. Recommendations do not guarantee replies or bookings.
+                 Configure how AI schedules emails for this campaign.
                </p>
+
+               <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6">
+                 <h4 className="text-white font-bold mb-4">Timing Settings</h4>
+                 <div className="grid grid-cols-2 gap-4">
+                   <div className="space-y-2">
+                     <label className="flex items-center text-slate-300 text-sm gap-2">
+                       <input type="checkbox" checked={campaignData?.useAiBestTime ?? true} readOnly className="rounded border-slate-600 bg-slate-800 text-purple-600 focus:ring-purple-500" />
+                       Use AI Best Send Time
+                     </label>
+                   </div>
+                   <div className="space-y-2">
+                     <label className="flex items-center text-slate-300 text-sm gap-2">
+                       <input type="checkbox" checked={!(campaignData?.weekendsEnabled ?? false)} readOnly className="rounded border-slate-600 bg-slate-800 text-purple-600 focus:ring-purple-500" />
+                       Avoid Weekends
+                     </label>
+                   </div>
+                   <div className="space-y-2">
+                     <label className="text-slate-400 text-sm block">Morning Window</label>
+                     <input type="text" value={`${campaignData?.morningWindowStart ?? '09:30'} AM - ${campaignData?.morningWindowEnd ?? '11:30'} AM`} readOnly className="bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white text-sm w-full" />
+                   </div>
+                   <div className="space-y-2">
+                     <label className="text-slate-400 text-sm block">Afternoon Window</label>
+                     <input type="text" value={`${campaignData?.afternoonWindowStart ?? '02:00'} PM - ${campaignData?.afternoonWindowEnd ?? '04:00'} PM`} readOnly className="bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white text-sm w-full" />
+                   </div>
+                   <div className="space-y-2">
+                     <label className="text-slate-400 text-sm block">Timezone Mode</label>
+                     <select disabled className="bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white text-sm w-full">
+                       <option>Lead location</option>
+                       <option>Campaign location</option>
+                       <option>Fixed timezone</option>
+                     </select>
+                   </div>
+                   <div className="space-y-2">
+                     <label className="text-slate-400 text-sm block">Daily Sending Limit</label>
+                     <input type="number" value={campaignData?.dailyLimit || 100} readOnly className="bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white text-sm w-full" />
+                   </div>
+                 </div>
+               </div>
 
                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
                  <h4 className="text-white font-bold mb-4">Upcoming Scheduled Deliveries</h4>
-                 <div className="space-y-3">
-                   {/* We would map through scheduled emails here */}
-                   <p className="text-slate-500 text-sm italic">All emails are currently waiting for human approval before entering the scheduler queue.</p>
+                 <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 mb-4 text-sm text-amber-400">
+                   <strong>Demo Mode:</strong> Connect SendGrid to send live emails. For this demo, you can review the sending queue below.
                  </div>
+                 <div className="overflow-x-auto">
+                   <table className="w-full text-left text-sm text-slate-300">
+                     <thead className="bg-slate-950 text-slate-400 border-b border-slate-800">
+                       <tr>
+                         <th className="px-4 py-3 font-medium">Step</th>
+                         <th className="px-4 py-3 font-medium">Subject</th>
+                         <th className="px-4 py-3 font-medium">Lead</th>
+                         <th className="px-4 py-3 font-medium">Scheduled Time</th>
+                         <th className="px-4 py-3 font-medium">Status</th>
+                         <th className="px-4 py-3 font-medium">Best Send Reason</th>
+                       </tr>
+                     </thead>
+                     <tbody className="divide-y divide-slate-800">
+                       <tr className="hover:bg-slate-800/30">
+                         <td className="px-4 py-3">1</td>
+                         <td className="px-4 py-3">Automate your follow-ups</td>
+                         <td className="px-4 py-3">Tech Innovators Inc</td>
+                         <td className="px-4 py-3 text-blue-400">Tomorrow 09:30 AM</td>
+                         <td className="px-4 py-3"><span className="px-2 py-1 bg-yellow-500/10 text-yellow-500 rounded text-xs">Queued</span></td>
+                         <td className="px-4 py-3 text-xs text-slate-400">High open rate historically</td>
+                       </tr>
+                       <tr className="hover:bg-slate-800/30">
+                         <td className="px-4 py-3">1</td>
+                         <td className="px-4 py-3">Quick question about your sales</td>
+                         <td className="px-4 py-3">Global Systems LLC</td>
+                         <td className="px-4 py-3 text-blue-400">Tomorrow 10:15 AM</td>
+                         <td className="px-4 py-3"><span className="px-2 py-1 bg-yellow-500/10 text-yellow-500 rounded text-xs">Queued</span></td>
+                         <td className="px-4 py-3 text-xs text-slate-400">Avoids local lunch hour</td>
+                       </tr>
+                     </tbody>
+                   </table>
+                 </div>
+               </div>
+            </div>
+         </div>
+      ) : activeTab === "Knowledge Base" ? (
+         <div className="space-y-6">
+            <div className="glass p-8 rounded-2xl border border-slate-700/50">
+               <div className="flex justify-between items-center mb-6">
+                 <div>
+                   <h3 className="text-xl font-bold text-white flex items-center gap-2"><BookOpen className="text-purple-400" /> Knowledge Base</h3>
+                   <p className="text-slate-400 text-sm">Upload documents about your offer, service, case studies, FAQs, or target audience. AI will use this information to write more accurate emails.</p>
+                 </div>
+                 <label className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors cursor-pointer inline-block whitespace-nowrap">
+                   {uploadingKb ? "Uploading..." : "Upload Knowledge File"}
+                   <input type="file" className="hidden" accept=".pdf,.docx,.txt,.csv,.md,.json" onChange={handleUploadKb} disabled={uploadingKb} />
+                 </label>
+               </div>
+               
+               {kbFiles.length === 0 ? (
+                 <div className="text-center py-12 bg-slate-900/50 rounded-xl border border-slate-700 border-dashed">
+                   <h4 className="text-lg text-white mb-2">No knowledge files yet</h4>
+                   <p className="text-slate-400 text-sm mb-4">Upload offer documents, service details, FAQs, or case studies so AI can write more accurate emails.</p>
+                 </div>
+               ) : (
+                 <div className="space-y-4">
+                   {kbFiles.map(file => (
+                     <div key={file.id} className="p-4 bg-slate-900 border border-slate-700 rounded-lg flex items-start justify-between">
+                       <div className="flex items-start gap-4">
+                         <input type="checkbox" checked={selectedKbFileIds.includes(file.id)} onChange={() => {
+                           if (selectedKbFileIds.includes(file.id)) {
+                             setSelectedKbFileIds(selectedKbFileIds.filter(id => id !== file.id));
+                           } else {
+                             setSelectedKbFileIds([...selectedKbFileIds, file.id]);
+                           }
+                         }} className="mt-1" />
+                         <div>
+                           <h4 className="text-white font-medium">{file.fileName}</h4>
+                           <p className="text-slate-400 text-xs mt-1">{file.summary}</p>
+                           <span className="inline-block mt-2 px-2 py-0.5 bg-slate-800 text-slate-300 text-xs rounded">{file.status}</span>
+                         </div>
+                       </div>
+                       <button className="text-red-400 text-sm hover:text-red-300" onClick={async () => {
+                         await fetch(`/api/knowledge-base/${file.id}`, { method: 'DELETE' });
+                         fetchCampaignData();
+                       }}>Delete</button>
+                     </div>
+                   ))}
+                   <p className="text-sm text-slate-400">{selectedKbFileIds.length} files selected for this campaign</p>
+                 </div>
+               )}
+            </div>
+         </div>
+      ) : activeTab === "Replies Inbox" ? (
+         <div className="space-y-6">
+            <div className="glass p-8 rounded-2xl border border-slate-700/50">
+               <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><MessageSquare className="text-purple-400" /> Replies Inbox</h3>
+               <div className="text-center py-12 bg-slate-900/50 rounded-xl border border-slate-700">
+                 <p className="text-slate-400">Replies will appear here once the campaign starts and leads respond.</p>
                </div>
             </div>
          </div>
@@ -346,19 +709,35 @@ export default function CampaignDetailPage() {
                  </div>
 
                  <div className="space-y-4">
-                   <h4 className="text-white font-semibold">AI Automation Modes</h4>
-                   <label className="block text-sm text-slate-400">Email Approval Rule</label>
+                   <h4 className="text-white font-semibold mt-6">Email Scheduling & Sending Limits</h4>
+                   <label className="block text-sm text-slate-400 mt-2">Daily Sending Limit</label>
+                   <input type="number" defaultValue={10} min={1} max={10} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white" />
+                   
+                   <label className="block text-sm text-slate-400 mt-2">Delay Between Emails</label>
                    <select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white">
-                     <option>Require Human Approval (Default)</option>
-                     <option>Auto-approve AI Emails</option>
+                     <option value="1">1 minute</option>
+                     <option value="2">2 minutes recommended</option>
+                     <option value="5">5 minutes</option>
+                     <option value="10">10 minutes</option>
+                     <option value="15">15 minutes</option>
                    </select>
+                 </div>
 
-                   <label className="block text-sm text-slate-400">Booking Automation</label>
+                 <div className="space-y-4">
+                   <h4 className="text-white font-semibold">AI Reply & Automation</h4>
+                   <label className="block text-sm text-slate-400">AI Reply Mode</label>
                    <select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white">
-                     <option>Manual Booking</option>
-                     <option>AI Suggests Slots in Reply</option>
-                     <option>AI Auto-Books Calendar</option>
+                     <option value="draft_first">Draft First (Recommended)</option>
+                     <option value="auto_send_safe">Auto-send Safe Replies</option>
+                     <option value="manual_only">Manual Only</option>
                    </select>
+                   <p className="text-xs text-slate-500">In Draft First mode, AI creates a suggested reply for you to review and send.</p>
+
+                   <label className="block text-sm text-slate-400 mt-4">Booking Goal</label>
+                   <div className="flex items-center space-x-2">
+                     <input type="checkbox" defaultChecked className="w-4 h-4 rounded bg-slate-900 border-slate-700 text-purple-500" />
+                     <span className="text-sm text-white">AI should try to book calls using your booking link</span>
+                   </div>
                  </div>
                </div>
             </div>
@@ -503,12 +882,15 @@ function EmailEditorBlock({ email, onSave, onApprove, onRegenerate }: { email: a
       </div>
       
       <div className="p-5 space-y-4">
-        {email.timingReason && (
+        {(email.bestSendReason || email.timingReason) && (
           <div className="bg-blue-500/10 border border-blue-500/20 rounded p-3 text-xs text-blue-300 flex items-start gap-2">
             <Calendar size={14} className="mt-0.5 shrink-0" />
             <div>
-              <span className="font-semibold block mb-0.5">AI Schedule Recommendation (Estimated: {new Date(email.scheduledAt || email.recommendedSendAt).toLocaleString()})</span>
-              {email.timingReason}
+              <span className="font-semibold block mb-1 text-sm text-blue-200">Next follow-up: {new Date(email.scheduledAt || email.recommendedSendAt).toLocaleString()} {email.scheduledTimezone || ''}</span>
+              <p className="mb-0.5"><span className="font-semibold text-blue-300">Scheduled Send Time:</span> {new Date(email.scheduledAt || email.recommendedSendAt).toLocaleString()}</p>
+              <p className="mb-0.5"><span className="font-semibold text-blue-300">Lead Timezone:</span> {email.scheduledTimezone || 'Unknown'}</p>
+              <p className="mb-0.5"><span className="font-semibold text-blue-300">Best Time Reason:</span> {email.bestSendReason || email.timingReason}</p>
+              <p><span className="font-semibold text-blue-300">Sequence:</span> Day {email.delayAmount} of 28 (Step {email.sequenceStep} of 25)</p>
             </div>
           </div>
         )}

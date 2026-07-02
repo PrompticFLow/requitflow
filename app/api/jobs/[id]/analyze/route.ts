@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await getCurrentUser();
@@ -24,7 +24,7 @@ export async function POST(
     }
 
     const openRouterKey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.OPENROUTER_MODEL || 'google/gemini-1.5-pro';
+    const model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
 
     if (!openRouterKey) {
       return NextResponse.json({ error: 'OpenRouter API key is not configured.' }, { status: 500 });

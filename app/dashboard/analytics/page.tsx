@@ -31,7 +31,7 @@ export default function AnalyticsPage() {
   if (error) {
     return (
       <div className="space-y-6">
-        <h2 className="text-3xl font-bold text-white mb-2">Recruitment Analytics</h2>
+        <h2 className="text-3xl font-bold text-white mb-2">Campaign Analytics</h2>
         <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 flex flex-col items-center justify-center text-center">
           <AlertCircle className="text-red-400 mb-4" size={32} />
           <h3 className="text-xl font-bold text-white mb-2">Analytics data could not be loaded.</h3>
@@ -42,21 +42,21 @@ export default function AnalyticsPage() {
   }
 
   // Handle empty state: if clientLeadsFound == 0 && candidatesFound == 0 && campaigns == 0
-  const isEmpty = data && data.clientLeadsFound === 0 && data.candidatesFound === 0 && data.activeRecruitmentCampaigns === 0 && data.emailsSent === 0;
+  const isEmpty = data && data.clientLeadsFound === 0 && data.candidatesFound === 0 && data.activeCampaigns === 0 && data.emailsSent === 0;
 
   if (isEmpty) {
     return (
       <div className="space-y-6">
         <div>
-          <h2 className="text-3xl font-bold text-white mb-2">Recruitment Analytics</h2>
+          <h2 className="text-3xl font-bold text-white mb-2">Campaign Analytics</h2>
           <p className="text-slate-400">Deep dive into your AI outreach performance and client/candidate sourcing metrics.</p>
         </div>
         <div className="glass p-12 rounded-2xl border border-slate-700/50 flex flex-col items-center justify-center text-center min-h-[50vh]">
           <div className="w-20 h-20 bg-blue-500/10 rounded-full flex items-center justify-center mb-6">
             <TrendingUp size={36} className="text-blue-400" />
           </div>
-          <h3 className="text-2xl font-bold text-white mb-3">No recruitment data yet.</h3>
-          <p className="text-slate-400 max-w-md mb-8">Start by finding client leads or creating your first recruitment campaign to see your analytics.</p>
+          <h3 className="text-2xl font-bold text-white mb-3">No campaign data yet.</h3>
+          <p className="text-slate-400 max-w-md mb-8">Start by finding client leads or creating your first campaign to see your analytics.</p>
           <div className="flex space-x-4">
             <Link href="/generate-leads" className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-lg font-medium transition-all shadow-lg shadow-blue-500/25">
               Find Client Leads
@@ -73,7 +73,7 @@ export default function AnalyticsPage() {
   const metrics = [
     { name: "Client Leads Found", value: data?.clientLeadsFound || 0 },
     { name: "Candidates Found", value: data?.candidatesFound || 0 },
-    { name: "Active Recruitment Campaigns", value: data?.activeRecruitmentCampaigns || 0 },
+    { name: "Active Campaigns", value: data?.activeCampaigns || 0 },
     { name: "Emails Sent", value: data?.emailsSent || 0 },
     { name: "SMS Sent", value: data?.smsSent || 0 },
     { name: "Replies Received", value: data?.repliesReceived || 0 },
@@ -87,7 +87,7 @@ export default function AnalyticsPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-end">
         <div>
-          <h2 className="text-3xl font-bold text-white mb-2">Recruitment Analytics</h2>
+          <h2 className="text-3xl font-bold text-white mb-2">Campaign Analytics</h2>
           <p className="text-slate-400">Deep dive into your AI outreach performance and client/candidate sourcing metrics.</p>
         </div>
       </div>

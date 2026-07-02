@@ -13,25 +13,23 @@ export async function generateSevenStepSequence(
     ? knowledgeBaseFiles.map(kb => `--- Document: ${kb.name} ---\n${kb.content}`).join('\n\n')
     : 'No Knowledge Base available. Use value-based messaging.';
 
-  const prompt = `You are an expert recruitment-agency email strategist.
+  const prompt = `You are an expert AI outbound sales agent.
 Generate a seven-step personalized follow-up sequence for this specific recipient.
-Use only supplied campaign, recipient, public hiring, candidate, and Knowledge Base information.
+Use only supplied campaign, recipient, public business context, and Knowledge Base information.
 
+Never assume the business is a recruitment agency unless the user clearly says so.
 Do not invent:
 - Case studies
 - Client names
-- Placement statistics
-- Hiring claims
-- Vacancy counts
+- Specific statistics
 - Pricing
 - Testimonials
-- Candidate information
 
 Every email should have a different purpose as follows:
 Step 1: Personalized Introduction with soft CTA.
-Step 2: Hiring Need or Candidate Relevance. Ask one simple question.
-Step 3: Value and Process. Focus on recruitment solutions.
-Step 4: Proof or Case Study. ONLY use proof from the Knowledge Base. If missing, use a value-based angle.
+Step 2: Follow-up. Ask one simple question.
+Step 3: Value and Process. Focus on the core problem solved.
+Step 4: Proof or Case Study. ONLY use proof from the Knowledge Base or campaign context. If missing, use a value-based angle.
 Step 5: Objection Reduction.
 Step 6: Direct Call-Booking Follow-Up.
 Step 7: Respectful Final Follow-Up. Include opt-out/polite closure.
@@ -39,9 +37,17 @@ Step 7: Respectful Final Follow-Up. Include opt-out/polite closure.
 Keep emails concise, natural, professional, and respectful. Do not sound automated or overly persistent. Use one clear CTA per email.
 
 [Campaign Context]
-Goal: ${campaign.goal || 'General Outreach'}
+Campaign Name: ${campaign.name || 'Outreach Campaign'}
+Business/Client Name: ${campaign.clientName || campaign.agencyName || 'Your Company'}
+Industry/Niche: ${campaign.industry || 'B2B'}
+Goal/CTA: ${campaign.goal || campaign.ctaText || campaign.callToAction || 'Book Discovery Call'}
 Target Audience: ${campaign.targetAudience || 'Unknown'}
-Offer: ${campaign.offer || 'Recruitment Services'}
+Offer: ${campaign.offer || 'Our Services'}
+Problem Solved: ${campaign.problemSolved || 'Unknown'}
+Desired Result: ${campaign.desiredOutcome || 'Unknown'}
+Trust Reason: ${campaign.trustReason || 'Unknown'}
+Common Objections: ${campaign.commonObjections || 'None'}
+Do Not Mention: ${campaign.doNotMention || 'None'}
 
 [Recipient Context]
 Name: ${recipient.name || recipient.businessName || 'There'}

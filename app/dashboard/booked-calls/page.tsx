@@ -1,16 +1,40 @@
 "use client";
-import { useState } from "react";
-import { Search, Calendar, ExternalLink } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Search, Calendar, ExternalLink, Loader2 } from "lucide-react";
 
 export default function BookedCallsPage() {
-  const [calls] = useState<any[]>([]);
+  const [calls, setCalls] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchCalls = async () => {
+      try {
+        const res = await fetch('/api/booked-calls');
+        const data = await res.json();
+        if (data.calls) setCalls(data.calls);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchCalls();
+  }, []);
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-end">
         <div>
-          <h2 className="text-3xl font-bold text-white mb-2">Booked Discovery & Screening Calls</h2>
-          <p className="text-slate-400">Track all client discovery and candidate screening calls booked through AI campaigns.</p>
+          <h2 className="text-3xl font-bold text-white mb-2">Booked Discovery Calls</h2>
+          <p className="text-slate-400">Track all client discovery calls booked through AI campaigns.</p>
+        </div>
+      </div>
+
+      <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex items-start space-x-3 text-blue-400">
+        <Calendar size={20} className="shrink-0 mt-0.5" />
+        <div className="text-sm">
+          <p className="font-semibold mb-1">Google Calendar is not connected yet. Booking Link Mode is active.</p>
+          <p>Leads are marked as booked based on your manual updates or simulated demo interactions.</p>
         </div>
       </div>
 
@@ -30,7 +54,7 @@ export default function BookedCallsPage() {
           <table className="w-full text-left text-sm text-slate-300">
             <thead className="bg-slate-900/50 text-slate-400 border-b border-slate-800">
               <tr>
-                <th className="px-6 py-4 font-medium">Client/Candidate Details</th>
+                <th className="px-6 py-4 font-medium">Lead Details</th>
                 <th className="px-6 py-4 font-medium">Campaign Source</th>
                 <th className="px-6 py-4 font-medium">Call Date</th>
                 <th className="px-6 py-4 font-medium">Status</th>
@@ -38,7 +62,14 @@ export default function BookedCallsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {calls.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="px-6 py-16 text-center text-slate-500">
+                    <Loader2 className="animate-spin mx-auto mb-2" size={24} />
+                    Loading...
+                  </td>
+                </tr>
+              ) : calls.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-6 py-16 text-center">
                     <div className="flex flex-col items-center justify-center">
@@ -47,7 +78,7 @@ export default function BookedCallsPage() {
                       </div>
                       <h3 className="text-lg font-medium text-white mb-2">No booked calls</h3>
                       <p className="text-slate-400 max-w-sm">
-                        No discovery or screening calls booked yet.
+                        No discovery calls booked yet.
                       </p>
                     </div>
                   </td>
@@ -56,22 +87,22 @@ export default function BookedCallsPage() {
                 calls.map((call) => (
                   <tr key={call.id} className="hover:bg-slate-800/30 transition-colors">
                     <td className="px-6 py-4">
-                      <div className="font-medium text-white">{call.lead}</div>
-                      <div className="text-xs text-slate-500">{call.email} • {call.phone}</div>
+                      <div className="font-medium text-white">{call.lead?.businessName || call.lead?.firstName || 'Unknown'}</div>
+                      <div className="text-xs text-slate-500">{call.lead?.email || ''} • {call.lead?.phone || ''}</div>
                     </td>
-                    <td className="px-6 py-4 text-slate-300">{call.campaign}</td>
+                    <td className="px-6 py-4 text-slate-300">{call.campaign?.name || 'Direct / CRM'}</td>
                     <td className="px-6 py-4 text-blue-400 flex items-center space-x-2 mt-2">
                       <Calendar size={14} />
-                      <span>{call.date}</span>
+                      <span>{call.callDate ? new Date(call.callDate).toLocaleString() : 'TBD'}</span>
                     </td>
                     <td className="px-6 py-4">
                       <span className="text-green-400 text-xs font-medium uppercase">{call.status}</span>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 transition-colors flex items-center space-x-2 ml-auto">
+                      <a href={`/dashboard/leads/${call.leadId}`} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 transition-colors inline-flex items-center space-x-2 ml-auto">
                         <ExternalLink size={14} />
                         <span className="text-xs">View CRM</span>
-                      </button>
+                      </a>
                     </td>
                   </tr>
                 ))

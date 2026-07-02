@@ -45,7 +45,7 @@ export default function CandidatesDatabasePage() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
           <h2 className="text-3xl font-bold text-white mb-2">Candidate Database</h2>
-          <p className="text-slate-400">View and manage sourced candidates for your recruitment campaigns.</p>
+          <p className="text-slate-400">View and manage sourced candidates for your outreach campaigns.</p>
         </div>
         <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 w-full md:w-80">
           <Search size={16} className="text-slate-400" />
@@ -90,7 +90,7 @@ export default function CandidatesDatabasePage() {
                         <Users size={32} />
                       </div>
                       <h3 className="text-lg font-medium text-white mb-2">No candidates found yet.</h3>
-                      <p className="text-slate-400 max-w-sm mb-6">Use Search Candidates to source profiles for your recruitment campaigns.</p>
+                      <p className="text-slate-400 max-w-sm mb-6">Use Search Candidates to source profiles for your outreach campaigns.</p>
                       <a href="/dashboard/search-candidates" className="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors flex items-center space-x-2">
                         <Search size={16} />
                         <span>Search Candidates</span>

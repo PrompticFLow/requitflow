@@ -3,17 +3,22 @@ import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { sendCampaignEmail } from '@/lib/sendgrid';
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
-    const sequence = await prisma.emailSequence.findUnique({
-      where: { id: params.id },
+    const { id } = await params;
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      return NextResponse.json({ success: false, error: "Email draft ID is missing." }, { status: 400 });
+    }
+
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id, userId: user.id },
       include: { lead: true }
     });
 
-    if (!sequence || sequence.userId !== user.id) {
+    if (!sequence) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
@@ -33,8 +38,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const isUnsub = await prisma.unsubscribeList.findUnique({
       where: { userId_email: { userId: user.id, email: sequence.lead.email } }
     });
-    if (isUnsub) {
+    if (isUnsub || sequence.lead.status === 'Unsubscribed') {
       return NextResponse.json({ error: 'Cannot send to unsubscribed lead' }, { status: 400 });
+    }
+
+    if (sequence.lead.status === 'Replied' || sequence.lead.status === 'Booked') {
+      return NextResponse.json({ error: 'Cannot send to a lead that has already replied or booked' }, { status: 400 });
+    }
+
+    const smtpAccount = await prisma.smtpAccount.findUnique({ where: { userId: user.id } });
+    if (!smtpAccount || !smtpAccount.isVerified || smtpAccount.status !== 'Active') {
+      return NextResponse.json({ error: 'SMTP must be verified before sending' }, { status: 400 });
     }
 
     const finalSubject = sequence.editedSubject || sequence.aiOriginalSubject || sequence.subject;

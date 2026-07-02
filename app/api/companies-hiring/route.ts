@@ -231,14 +231,14 @@ export async function GET(req: Request) {
         industry: null,
         source: company.source || 'Unknown',
         openRolesFound,
-        exactHeadcount: exactHeadcount ? exactHeadcount.toString() : 'Not publicly disclosed',
+        exactHeadcount: exactHeadcount ? String(exactHeadcount) : 'Not publicly disclosed',
         categoryCounts,
         topRoles,
         locations: Array.from(locationsSet).slice(0, 5),
         remoteRolesCount,
         hybridRolesCount,
         onsiteRolesCount,
-        lastUpdated: latestPostingDate ? latestPostingDate.toISOString() : (company.updatedAt ? company.updatedAt.toISOString() : null),
+        lastUpdated: latestPostingDate ? new Date(latestPostingDate as Date).toISOString() : (company.updatedAt ? new Date(company.updatedAt as Date).toISOString() : null),
         dataStatus: "FRESH", // Could derive STALE from lastUpdated
         hiringActivity: calculatedActivity,
         // UI flags

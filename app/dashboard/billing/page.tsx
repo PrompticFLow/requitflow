@@ -2,9 +2,9 @@ import { CreditCard, CheckCircle2, Zap } from "lucide-react";
 
 export default function BillingPlaceholder() {
   const plans = [
-    { name: "Starter", price: "$49", features: ["1,000 Client Leads/mo", "Basic AI Email Generation", "1 Email Account Connect"] },
-    { name: "Pro", price: "$149", features: ["10,000 Client Leads/mo", "Advanced AI Personalization", "5 Email Accounts Connect", "Apify Candidate Search"] },
-    { name: "Agency", price: "$399", features: ["Unlimited Leads", "Custom AI Models", "Unlimited Accounts", "White Label Options", "API Access"] }
+    { name: "Starter", price: "$49", features: ["1,000 Client Leads/mo", "Basic Email Automation", "1 Email Account Connect"] },
+    { name: "Pro", price: "$149", features: ["10,000 Client Leads/mo", "Advanced AI Personalization", "5 Email Accounts Connect", "AI Agent Candidate Search"] },
+    { name: "Agency", price: "$299", features: ["Unlimited Leads", "White-label Dashboard", "Unlimited Email Accounts"] }
   ];
 
   return (

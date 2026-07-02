@@ -105,7 +105,7 @@ export default function DashboardOverview() {
 
       <h2 className="text-xl font-bold text-white mt-8 mb-4">Hiring Analytics</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Link href="/dashboard/companies-hiring" className="glass p-6 rounded-2xl border border-slate-800 hover:border-indigo-500/50 transition-all group">
+        <Link href="/dashboard/person-leads" className="glass p-6 rounded-2xl border border-slate-800 hover:border-indigo-500/50 transition-all group">
           <div className="flex items-center space-x-4">
             <div className="p-3 bg-indigo-500/10 rounded-xl group-hover:bg-indigo-500/20 transition-all">
               <Building2 className="text-indigo-400" size={24} />
@@ -157,10 +157,8 @@ export default function DashboardOverview() {
         </div>
         <h3 className="text-xl font-bold text-white mb-2">Get Started</h3>
         <p className="text-slate-400 max-w-md mb-6">Start by generating your first list of ideal client leads and launching an automated email campaign.</p>
-        <Link href="/dashboard/generate-leads">
-          <button className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-full font-medium transition-all shadow-lg shadow-blue-500/25">
-            Find Client Leads
-          </button>
+        <Link href="/dashboard/generate-leads" className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-full font-medium transition-all shadow-lg shadow-blue-500/25">
+          Find Client Leads
         </Link>
       </div>
     </div>

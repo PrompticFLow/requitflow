@@ -9,8 +9,12 @@ export async function POST(req: Request) {
 
   const { sequenceId } = await req.json();
 
-  const sequence = await prisma.emailSequence.findUnique({ 
-    where: { id: sequenceId },
+  if (!sequenceId || typeof sequenceId !== "string" || sequenceId.trim() === "") {
+    return NextResponse.json({ success: false, error: "Email draft ID is missing." }, { status: 400 });
+  }
+
+  const sequence = await prisma.emailSequence.findFirst({ 
+    where: { id: sequenceId, userId: user.id },
     include: { lead: true }
   });
 

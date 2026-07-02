@@ -28,7 +28,7 @@ async function generatePersonalizedEmail(campaignLeadId) {
     }
 
     const openRouterKey = user.openRouterKey || process.env.OPENROUTER_API_KEY;
-    const model = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
+    const model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
 
     if (!openRouterKey) {
       throw new Error('OpenRouter API key not configured for this user.');

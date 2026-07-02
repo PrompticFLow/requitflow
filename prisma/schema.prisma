@@ -9,455 +9,483 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(uuid())
-  name          String
-  email         String    @unique
-  passwordHash  String
-  companyName   String?
-  role          String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  settings       UserSettings?
-  smtpAccount    SmtpAccount?
-  leads          Lead[]
-  campaigns      Campaign[]
-  emailSequences EmailSequence[]
-  smsSequences   SmsSequence[]
-  replies        Reply[]
-  bookedCalls    BookedCall[]
-  activityLogs   ActivityLog[]
-  unsubscribeList UnsubscribeList[]
-  candidates     Candidate[]
-  candidateSearches CandidateSearch[]
-
-  candidateProfiles CandidateProfile[]
-  resumes           Resume[]
-  savedJobs         SavedJob[]
-  jobApplications   JobApplication[]
-  jobSearchHistory  JobSearchHistory[]
-  aiJobAnalyses     AIJobAnalysis[]
-  apiUsages         APIUsage[]
-  companyFilterPresets CompanyFilterPreset[]
+  id                        String                     @id @default(uuid())
+  name                      String
+  email                     String                     @unique
+  passwordHash              String
+  companyName               String?
+  role                      String?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  aiJobAnalyses             AIJobAnalysis[]
+  apiUsages                 APIUsage[]
+  activityLogs              ActivityLog[]
+  bookedCalls               BookedCall[]
+  campaigns                 Campaign[]
+  candidates                Candidate[]
+  candidateProfiles         CandidateProfile[]
+  candidateSearches         CandidateSearch[]
+  companyFilterPresets      CompanyFilterPreset[]
+  emailReplies              EmailReply[]
+  emailSequences            EmailSequence[]
+  googleCalendarIntegration GoogleCalendarIntegration?
+  jobApplications           JobApplication[]
+  jobSearchHistory          JobSearchHistory[]
+  knowledgeBaseFiles        KnowledgeBaseFile[]
+  leads                     Lead[]
+  replies                   Reply[]
+  resumes                   Resume[]
+  savedJobs                 SavedJob[]
+  smsSequences              SmsSequence[]
+  smtpAccount               SmtpAccount?
+  unsubscribeList           UnsubscribeList[]
+  settings                  UserSettings?
 }
 
 model UserSettings {
   id                       String   @id @default(uuid())
   userId                   String   @unique
-  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
   apifyTokenEncrypted      String?
   openrouterKeyEncrypted   String?
   openrouterModel          String?
-  
   twilioSidEncrypted       String?
   twilioAuthTokenEncrypted String?
   twilioPhone              String?
-  
   smtpHost                 String?
   smtpPort                 String?
   smtpUserEncrypted        String?
   smtpPassEncrypted        String?
   smtpFromName             String?
   smtpFromEmail            String?
-  
   bookingLink              String?
-  
   dailyEmailLimit          Int      @default(100)
   emailDelaySeconds        Int      @default(30)
   smsDelaySeconds          Int      @default(15)
   defaultCountry           String?
   defaultCampaignGoal      String?
-  
   manualApprovalMode       Boolean  @default(true)
   autoSendMode             Boolean  @default(false)
-  
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
+  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Lead {
-  id              String   @id @default(uuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  campaignId      String?
-  campaign        Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-
-  companyId       String?
-  company         Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
-
-  businessName    String
-  phone           String?
-  email           String?
-  website         String?
-  address         String?
-  rating          Float?
-  reviewCount     Int?
-  googleMapsLink  String?
-  category        String?
-  country         String?
-  location        String?
-  
-  leadScore       Int      @default(0)
-  leadTier        String   @default("Cold") // Hot, Warm, Cold
-  aiInsight       String?
-  
-  source          String   @default("Apify")
-  status          String   @default("New") // New, Added to Campaign, Email Generated, Email Sent, SMS Sent, Replied, Interested, Not Interested, Call Booked, Closed, Unsubscribed
-  
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  campaignLeads   CampaignLead[]
-  emailSequences  EmailSequence[]
-  smsSequences    SmsSequence[]
-  replies         Reply[]
-  bookedCalls     BookedCall[]
-  activityLogs    ActivityLog[]
-  emailSendLogs   EmailSendLog[]
-  emailReplies    EmailReply[]
+  id               String          @id @default(uuid())
+  userId           String
+  campaignId       String?
+  businessName     String
+  phone            String?
+  email            String?
+  website          String?
+  address          String?
+  rating           Float?
+  reviewCount      Int?
+  googleMapsLink   String?
+  category         String?
+  country          String?
+  location         String?
+  leadScore        Int             @default(0)
+  leadTier         String          @default("Cold")
+  aiInsight        String?
+  source           String          @default("Apify")
+  status           String          @default("New")
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  companyId        String?
+  firstName        String?
+  fullName         String?
+  industry         String?
+  jobTitle         String?
+  lastName         String?
+  linkedinUrl      String?
+  aiFitReason      String?
+  aiFitScore       Int?
+  businessCategory String?
+  emailStatus      String?
+  googleMapsUrl    String?
+  phoneStatus      String?
+  rawData          Json?
+  leadType         String?
+  validationStatus String?
+  activityLogs     ActivityLog[]
+  bookedCalls      BookedCall[]
+  campaignLeads    CampaignLead[]
+  emailReplies     EmailReply[]
+  emailSendLogs    EmailSendLog[]
+  emailSequences   EmailSequence[]
+  campaign         Campaign?       @relation(fields: [campaignId], references: [id])
+  company          Company?        @relation(fields: [companyId], references: [id])
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replies          Reply[]
+  smsSequences     SmsSequence[]
 }
 
 model Campaign {
-  id                 String   @id @default(uuid())
-  userId             String
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  name               String
-  goal               String?
-  businessType       String?
-  location           String?
-  country            String?
-  
-  campaignType       String?
-  targetAudience     String?
-  industry           String?
-  offer              String?
-  tone               String?
-  language           String?
-  ctaType            String?
-  ctaLink            String?
-  senderName         String?
-  agencyName         String?
-  emailSignature     String?
-  sendingMode        String   @default("Human Approval Mode")
-  
-  status             String   @default("Draft") // Draft, Active, Paused, Completed, Stopped
-  bookingLink        String?
-  
-  problemSolved      String?
-  mainBenefit        String?
-  proofCaseStudy     String?
-  unsubscribeLine    String?
-  senderEmail        String?
-  
-  // AI Email Writing Settings
-  personalizationLevel String?
-  emailLength          String?
-  spamSafety           String?
-  ctaStyle             String?
-  
-  // 7-step sequence & AI timing settings
-  followUpCount               Int      @default(7)
-  timingMode                  String   @default("AI Recommended")
-  timezoneMode                String   @default("Recipient Local Time")
-  allowedSendingDays          String?  // JSON e.g. ["Mon","Tue","Wed","Thu","Fri"]
-  sendingWindowStart          String?  @default("09:00")
-  sendingWindowEnd            String?  @default("16:00")
-  weekendsEnabled             Boolean  @default(false)
-  skipHolidays                Boolean  @default(true)
-  autoApproveEmails           Boolean  @default(false)
-  autoSendApprovedEmails      Boolean  @default(false)
-  bookingAutomationMode       String   @default("Manual Booking")
-  meetingType                 String?
-  meetingDuration             Int      @default(30)
-  minimumBookingNotice        Int      @default(24) // hours
-  maximumBookingHorizon       Int      @default(14) // days
-  autoCreateCalendarEvent     Boolean  @default(false)
-  autoSendBookingConfirmation Boolean  @default(false)
-  knowledgeBaseMode           String   @default("Use All Knowledge Base Files")
-  selectedKnowledgeBaseFileIds String? // JSON
-
-  emailSequenceCount Int      @default(0)
-  smsSequenceCount   Int      @default(0)
-  
-  dailyLimit         Int?
-  sendDelaySeconds   Int?
-  
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-
-  leads              Lead[]
-  campaignLeads      CampaignLead[]
-  emailSequences     EmailSequence[]
-  smsSequences       SmsSequence[]
-  replies            Reply[]
-  bookedCalls        BookedCall[]
-  activityLogs       ActivityLog[]
-  emailSendLogs      EmailSendLog[]
-  emailReplies       EmailReply[]
+  id                           String              @id @default(uuid())
+  userId                       String
+  name                         String
+  goal                         String?
+  businessType                 String?
+  location                     String?
+  country                      String?
+  status                       String              @default("Draft")
+  bookingLink                  String?
+  emailSequenceCount           Int                 @default(0)
+  smsSequenceCount             Int                 @default(0)
+  dailyLimit                   Int?
+  sendDelaySeconds             Int?
+  createdAt                    DateTime            @default(now())
+  updatedAt                    DateTime            @updatedAt
+  agencyName                   String?
+  campaignType                 String?
+  ctaLink                      String?
+  ctaType                      String?
+  emailSignature               String?
+  industry                     String?
+  language                     String?
+  offer                        String?
+  senderName                   String?
+  sendingMode                  String              @default("Human Approval Mode")
+  targetAudience               String?
+  tone                         String?
+  allowedSendingDays           String?
+  autoApproveEmails            Boolean             @default(false)
+  autoCreateCalendarEvent      Boolean             @default(false)
+  autoSendApprovedEmails       Boolean             @default(false)
+  autoSendBookingConfirmation  Boolean             @default(false)
+  bookingAutomationMode        String              @default("Manual Booking")
+  followUpCount                Int                 @default(7)
+  knowledgeBaseMode            String              @default("Use All Knowledge Base Files")
+  maximumBookingHorizon        Int                 @default(14)
+  meetingDuration              Int                 @default(30)
+  meetingType                  String?
+  minimumBookingNotice         Int                 @default(24)
+  selectedKnowledgeBaseFileIds String?
+  sendingWindowEnd             String?             @default("16:00")
+  sendingWindowStart           String?             @default("09:00")
+  skipHolidays                 Boolean             @default(true)
+  timezoneMode                 String              @default("Recipient Local Time")
+  timingMode                   String              @default("AI Recommended")
+  weekendsEnabled              Boolean             @default(false)
+  mainBenefit                  String?
+  problemSolved                String?
+  proofCaseStudy               String?
+  senderEmail                  String?
+  unsubscribeLine              String?
+  ctaStyle                     String?
+  emailLength                  String?
+  personalizationLevel         String?
+  spamSafety                   String?
+  autoReplyEnabled             Boolean             @default(false)
+  autoReplyMode                String?             @default("draft_first")
+  bookingGoalEnabled           Boolean             @default(true)
+  replyDelayMaxMinutes         Int                 @default(12)
+  replyDelayMinMinutes         Int                 @default(3)
+  startedAt                    DateTime?
+  avoidSaying                  String?
+  bookingLinkStrategy          String?
+  bookingMethod                String?             @default("Booking link")
+  companyFallback              String?             @default("your team")
+  ctaText                      String?
+  desiredOutcome               String?
+  mentionCompanyName           Boolean             @default(true)
+  objections                   String?
+  painPoints                   String?
+  personalizationStyle         String?
+  targetCompanyType            String?
+  targetIndustry               String?
+  targetMarket                 String?
+  targetRoles                  String?
+  uniqueMechanism              String?
+  useKnowledgeBase             Boolean             @default(true)
+  afternoonWindowEnd           String?             @default("16:00")
+  afternoonWindowStart         String?             @default("14:00")
+  aiAnalysis                   Json?
+  followUpStyle                String?
+  morningWindowEnd             String?             @default("11:30")
+  morningWindowStart           String?             @default("09:30")
+  useAiBestTime                Boolean             @default(true)
+  bookingGoal                  String?
+  callToAction                 String?
+  clientName                   String?
+  commonObjections             String?
+  doNotMention                 String?
+  proof                        String?
+  targetLocation               String?
+  trustReason                  String?
+  activityLogs                 ActivityLog[]
+  bookedCalls                  BookedCall[]
+  user                         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaignLeads                CampaignLead[]
+  emailReplies                 EmailReply[]
+  emailSendLogs                EmailSendLog[]
+  emailSequences               EmailSequence[]
+  knowledgeBaseFiles           KnowledgeBaseFile[]
+  leads                        Lead[]
+  replies                      Reply[]
+  smsSequences                 SmsSequence[]
 }
 
 model CampaignLead {
   id         String   @id @default(uuid())
   campaignId String
-  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   leadId     String
-  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  
   status     String   @default("Pending")
   addedAt    DateTime @default(now())
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@unique([campaignId, leadId])
 }
 
 model EmailSequence {
-  id                  String   @id @default(uuid())
-  userId              String
-  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  campaignId          String
-  campaign            Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  leadId              String
-  lead                Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  
-  name                String?
-  subject             String
-  previewText         String?
-  body                String
-  sequenceStep        Int
-  
-  ctaText             String?
-  ctaLink             String?
-  delayAmount         Int      @default(0)
-  delayUnit           String   @default("business_days")
-  
-  status              String   @default("Draft") // Draft, Scheduled, Sent, Failed
-  approvalStatus      String   @default("Pending") // Pending, Approved, Rejected
-  
-  emailType           String?
-  purpose             String?
-  extraInstruction    String?
-  enabled             Boolean  @default(true)
-  
-  personalizationLevel String?
-  emailLength         String?
-  spamSafety          String?
-  ctaStyle            String?
-  
-  aiOriginalSubject   String?
-  aiOriginalBody      String?
-  editedSubject       String?
-  editedBody          String?
-  personalizationData String?  // JSON string
-  aiGenerationReason  String?
-  personalizationScore Int?
-  spamRisk            String?
-  
-  scheduledAt         DateTime?
-  scheduledTimezone   String?
-  recommendedSendAt   DateTime?
-  timingReason        String?
-  knowledgeBaseSources String? // JSON
+  id                    String         @id @default(uuid())
+  userId                String
+  campaignId            String
+  leadId                String
+  subject               String
+  body                  String
+  sequenceStep          Int
+  status                String         @default("Draft")
+  scheduledAt           DateTime?
+  sentAt                DateTime?
+  replyReceived         Boolean        @default(false)
+  errorMessage          String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  aiGenerationReason    String?
+  aiOriginalBody        String?
+  aiOriginalSubject     String?
+  approvalStatus        String         @default("Pending")
+  approvedAt            DateTime?
+  ctaLink               String?
+  ctaText               String?
+  editedBody            String?
+  editedSubject         String?
+  name                  String?
+  personalizationData   String?
+  personalizationScore  Int?
+  previewText           String?
+  spamRisk              String?
+  delayAmount           Int            @default(0)
+  delayUnit             String         @default("business_days")
+  knowledgeBaseSources  String?
   personalizationReason String?
-  skippedAt           DateTime?
-  stoppedAt           DateTime?
-  sentAt              DateTime?
-  approvedAt          DateTime?
-  replyReceived       Boolean  @default(false)
-  errorMessage        String?
-  
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  
-  emailSendLogs       EmailSendLog[]
+  recommendedSendAt     DateTime?
+  scheduledTimezone     String?
+  skippedAt             DateTime?
+  stoppedAt             DateTime?
+  timingReason          String?
+  ctaStyle              String?
+  emailLength           String?
+  emailType             String?
+  enabled               Boolean        @default(true)
+  extraInstruction      String?
+  personalizationLevel  String?
+  purpose               String?
+  spamSafety            String?
+  bestSendReason        String?
+  sendWindow            String?
+  deletedAt             DateTime?
+  spamIssues            String?
+  emailSendLogs         EmailSendLog[]
+  campaign              Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead                  Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user                  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model SmsSequence {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   campaignId    String
-  campaign      Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   leadId        String
-  lead          Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  
   message       String
   sequenceStep  Int
-  
-  status        String   @default("Draft") // Draft, Approved, Scheduled, Sent, Failed
+  status        String    @default("Draft")
   scheduledAt   DateTime?
   sentAt        DateTime?
-  replyReceived Boolean  @default(false)
+  replyReceived Boolean   @default(false)
   errorMessage  String?
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  campaign      Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead          Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Reply {
-  id               String   @id @default(uuid())
+  id               String    @id @default(uuid())
   userId           String
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   leadId           String
-  lead             Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   campaignId       String?
-  campaign         Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  
-  channel          String // Email, SMS
+  channel          String
   messageBody      String
-  intent           String? // Interested, Not Interested, Objection, etc.
+  intent           String?
   aiSuggestedReply String?
-  status           String   @default("Unread") // Unread, Handled, Ignored
-  
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  status           String    @default("Unread")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  campaign         Campaign? @relation(fields: [campaignId], references: [id])
+  lead             Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model BookedCall {
-  id                 String   @id @default(uuid())
-  userId             String
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  leadId             String
-  lead               Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  campaignId         String?
-  campaign           Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  
-  callDate           DateTime?
-  bookingLink        String?
-  status             String   @default("Scheduled") // Scheduled, Completed, Canceled
-  notes              String?
-  
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id          String    @id @default(uuid())
+  userId      String
+  leadId      String
+  campaignId  String?
+  callDate    DateTime?
+  bookingLink String?
+  status      String    @default("Scheduled")
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  campaign    Campaign? @relation(fields: [campaignId], references: [id])
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model ActivityLog {
-  id          String   @id @default(uuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  leadId      String?
-  lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  campaignId  String?
-  campaign    Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  
+  id           String    @id @default(uuid())
+  userId       String
+  leadId       String?
+  campaignId   String?
   activityType String
   description  String
-  metadata     String? // JSON string
-  
-  createdAt    DateTime @default(now())
+  metadata     String?
+  createdAt    DateTime  @default(now())
+  campaign     Campaign? @relation(fields: [campaignId], references: [id])
+  lead         Lead?     @relation(fields: [leadId], references: [id])
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model SmtpAccount {
-  id                 String   @id @default(uuid())
-  userId             String   @unique
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  smtpHost           String
-  smtpPort           Int
-  smtpUserEncrypted  String
-  smtpPassEncrypted  String
-  fromName           String
-  fromEmail          String
-  replyToEmail       String?
-  
-  secure             Boolean  @default(true)
-  dailyLimit         Int      @default(10)
-  delayBetweenEmailsSeconds Int @default(120)
-  isVerified         Boolean  @default(false)
-  
-  status             String   @default("Active") // Active, Failed
-  
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                        String    @id @default(uuid())
+  userId                    String    @unique
+  smtpHost                  String
+  smtpPort                  Int
+  smtpUserEncrypted         String
+  smtpPassEncrypted         String
+  fromName                  String
+  fromEmail                 String
+  replyToEmail              String?
+  status                    String    @default("Active")
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  dailyLimit                Int       @default(10)
+  delayBetweenEmailsSeconds Int       @default(120)
+  isVerified                Boolean   @default(false)
+  secure                    Boolean   @default(true)
+  imapEnabled               Boolean   @default(false)
+  imapHost                  String?
+  imapLastSyncedAt          DateTime?
+  imapPasswordEncrypted     String?
+  imapPort                  Int?
+  imapSecure                Boolean   @default(true)
+  imapUsername              String?
+  imapVerified              Boolean   @default(false)
+  imapUsernameEncrypted     String?
+  replyCaptureMethod        String?   @default("imap")
+  sendgridInboundDomain     String?
+  sendgridInboundEnabled    Boolean   @default(false)
+  user                      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model EmailSendLog {
-  id              String   @id @default(uuid())
+  id              String        @id @default(uuid())
   campaignId      String
-  campaign        Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   leadId          String
-  lead            Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   emailSequenceId String
-  emailSequence   EmailSequence @relation(fields: [emailSequenceId], references: [id], onDelete: Cascade)
-  
   subject         String
   body            String
-  
-  status          String   @default("Sent") // Sent, Failed, Bounced
-  
-  sentAt          DateTime @default(now())
+  status          String        @default("Sent")
+  sentAt          DateTime      @default(now())
   openedAt        DateTime?
   clickedAt       DateTime?
   bouncedAt       DateTime?
   errorMessage    String?
-  
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  campaign        Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  emailSequence   EmailSequence @relation(fields: [emailSequenceId], references: [id], onDelete: Cascade)
+  lead            Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
 }
 
 model EmailReply {
-  id                String   @id @default(uuid())
-  campaignId        String?
-  campaign          Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  leadId            String
-  lead              Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  
-  emailBody         String
-  aiCategory        String?
-  aiSuggestedReply  String?
-  recommendedAction String?
-  shouldAutoSend    Boolean  @default(false)
-  
-  status            String   @default("Unread") // Unread, Handled, Ignored
-  
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                 String    @id @default(uuid())
+  campaignId         String?
+  leadId             String?
+  aiSuggestedReply   String?
+  status             String    @default("Unread")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  aiReplyScheduledAt DateTime?
+  aiReplySentAt      DateTime?
+  aiReplyStatus      String    @default("Draft")
+  aiReplySubject     String?
+  body               String
+  bookedCall         Boolean   @default(false)
+  canAutoSend        Boolean   @default(false)
+  classification     String?
+  confidence         Float?
+  emailSequenceId    String?
+  fromEmail          String
+  intent             String?
+  sentiment          String?
+  shouldReply        Boolean   @default(false)
+  subject            String?
+  toEmail            String?
+  userId             String
+  messageId          String?
+  campaign           Campaign? @relation(fields: [campaignId], references: [id])
+  lead               Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([campaignId])
+  @@index([leadId])
+  @@index([emailSequenceId])
 }
 
 model UnsubscribeList {
-  id          String   @id @default(uuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  email       String
-  reason      String?
-  
-  createdAt   DateTime @default(now())
-  
+  id        String   @id @default(uuid())
+  userId    String
+  email     String
+  reason    String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([userId, email])
 }
 
 model Candidate {
-  id          String   @id @default(uuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  name        String
-  jobTitle    String?
-  email       String?
-  phone       String?
-  location    String?
-  country     String?
-  skills      String?
-  experience  String?
-  profileUrl  String?
-  resumeUrl   String?
-  
-  source      String   @default("Job Board API")
-  matchScore  Int?
-  aiSummary   String?
-  status      String   @default("New")
-  rawData     String? // JSON string
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  userId     String
+  name       String
+  jobTitle   String?
+  email      String?
+  phone      String?
+  location   String?
+  country    String?
+  skills     String?
+  experience String?
+  profileUrl String?
+  resumeUrl  String?
+  source     String   @default("Job Board API")
+  matchScore Int?
+  aiSummary  String?
+  status     String   @default("New")
+  rawData    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model CandidateSearch {
   id              String   @id @default(uuid())
   userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
   jobTitle        String?
   skills          String?
   location        String?
@@ -466,99 +494,89 @@ model CandidateSearch {
   maxResults      Int      @default(10)
   totalFound      Int      @default(0)
   status          String   @default("Completed")
-  
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model CandidateProfile {
-  id                String   @id @default(uuid())
-  userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  firstName         String
-  lastName          String
-  email             String?
-  phone             String?
-  city              String?
-  country           String?
-  currentJobTitle   String?
-  desiredJobTitle   String?
-  skills            String?
-  yearsOfExperience String?
-  education         String?
-  certifications    String?
-  preferredWorkMode String?
-  preferredJobTypes String?
-  minimumSalary     String?
+  id                 String           @id @default(uuid())
+  userId             String
+  firstName          String
+  lastName           String
+  email              String?
+  phone              String?
+  city               String?
+  country            String?
+  currentJobTitle    String?
+  desiredJobTitle    String?
+  skills             String?
+  yearsOfExperience  String?
+  education          String?
+  certifications     String?
+  preferredWorkMode  String?
+  preferredJobTypes  String?
+  minimumSalary      String?
   preferredLocations String?
-  profileSummary    String?
-  
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  resumes           Resume[]
-  jobApplications   JobApplication[]
-  aiJobAnalyses     AIJobAnalysis[]
+  profileSummary     String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  aiJobAnalyses      AIJobAnalysis[]
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobApplications    JobApplication[]
+  resumes            Resume[]
 }
 
 model Resume {
-  id                String   @id @default(uuid())
-  userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String            @id @default(uuid())
+  userId             String
   candidateProfileId String?
-  candidateProfile  CandidateProfile? @relation(fields: [candidateProfileId], references: [id], onDelete: SetNull)
-  
-  fileName          String
-  fileType          String
-  fileSize          Int
-  storagePath       String
-  extractedText     String?
-  structuredData    String?  // JSON
-  status            String   @default("Pending")
-  errorMessage      String?
-  
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  fileName           String
+  fileType           String
+  fileSize           Int
+  storagePath        String
+  extractedText      String?
+  structuredData     String?
+  status             String            @default("Pending")
+  errorMessage       String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  candidateProfile   CandidateProfile? @relation(fields: [candidateProfileId], references: [id])
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Company {
-  id                       String   @id @default(uuid())
-  externalId               String?  @unique
+  id                       String    @id @default(uuid())
+  externalId               String?   @unique
   name                     String
   website                  String?
   location                 String?
   country                  String?
-  activeJobPostCount       Int      @default(0)
-  recentJobPostCount       Int      @default(0)
-  recentJobPostCount7Days  Int      @default(0)
-  recentJobPostCount30Days Int      @default(0)
+  activeJobPostCount       Int       @default(0)
+  recentJobPostCount       Int       @default(0)
   latestPostingDate        DateTime?
-  hiringActivity           String?
   hiringDemand             String?
   aiHiringInsight          String?
-  source                   String   @default("Adzuna")
-  rawData                  String?  // JSON
-  
-  archived                 Boolean  @default(false)
+  source                   String    @default("Adzuna")
+  rawData                  String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  hiringActivity           String?
+  recentJobPostCount30Days Int       @default(0)
+  recentJobPostCount7Days  Int       @default(0)
+  archived                 Boolean   @default(false)
   archivedAt               DateTime?
   archivedBy               String?
   archiveReason            String?
-
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
-
   jobs                     Job[]
   leads                    Lead[]
 }
 
 model Job {
-  id                 String   @id @default(uuid())
-  externalId         String?  @unique
+  id                 String           @id @default(uuid())
+  externalId         String?          @unique
   companyId          String?
-  company            Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  
-  source             String   @default("Adzuna")
+  source             String           @default("Adzuna")
   title              String
   category           String?
   description        String?
@@ -575,96 +593,83 @@ model Job {
   salaryMin          Float?
   salaryMax          Float?
   salaryCurrency     String?
-  salaryDisclosed    Boolean  @default(false)
+  salaryDisclosed    Boolean          @default(false)
   requiredExperience String?
   requiredSkills     String?
   preferredSkills    String?
   datePosted         DateTime?
   applicationUrl     String?
   companyWebsite     String?
-  
   vacancies          Int?
   candidatesNeeded   Int?
   vacancyStatus      String?
   vacancyEvidence    String?
   hiringUrgency      String?
   hiringDemand       String?
-  
   aiSummary          String?
-  rawData            String?  // JSON
+  rawData            String?
   descriptionHash    String?
-  
-  firstSeenAt        DateTime @default(now())
-  lastSeenAt         DateTime @default(now())
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-
-  savedJobs          SavedJob[]
-  jobApplications    JobApplication[]
+  firstSeenAt        DateTime         @default(now())
+  lastSeenAt         DateTime         @default(now())
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
   aiJobAnalyses      AIJobAnalysis[]
+  company            Company?         @relation(fields: [companyId], references: [id])
+  jobApplications    JobApplication[]
+  savedJobs          SavedJob[]
 }
 
 model SavedJob {
-  id          String   @id @default(uuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  jobId       String
-  job         Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  
-  notes       String?
-  tags        String?
-  priority    String   @default("Medium")
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  userId    String
+  jobId     String
+  notes     String?
+  tags      String?
+  priority  String   @default("Medium")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, jobId])
 }
 
 model JobApplication {
-  id                 String   @id @default(uuid())
+  id                 String            @id @default(uuid())
   userId             String
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   candidateProfileId String?
-  candidateProfile   CandidateProfile? @relation(fields: [candidateProfileId], references: [id], onDelete: SetNull)
   jobId              String
-  job                Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  
-  status             String   @default("Applied") // Saved, Applied, Interview, Rejected, Offer Received, Hired, Withdrawn
+  status             String            @default("Applied")
   applicationDate    DateTime?
   interviewDate      DateTime?
   notes              String?
   applicationMessage String?
   coverLetter        String?
-  
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  candidateProfile   CandidateProfile? @relation(fields: [candidateProfileId], references: [id])
+  job                Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model JobSearchHistory {
-  id             String   @id @default(uuid())
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  searchFilters  String?  // JSON
-  countryCode    String?
-  totalResults   Int      @default(0)
-  
-  createdAt      DateTime @default(now())
+  id            String   @id @default(uuid())
+  userId        String
+  searchFilters String?
+  countryCode   String?
+  totalResults  Int      @default(0)
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model AIJobAnalysis {
-  id                 String   @id @default(uuid())
+  id                 String            @id @default(uuid())
   userId             String
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   jobId              String
-  job                Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
   candidateProfileId String?
-  candidateProfile   CandidateProfile? @relation(fields: [candidateProfileId], references: [id], onDelete: SetNull)
-  
   summary            String?
-  requiredSkills     String?  // JSON array
-  preferredSkills    String?  // JSON array
+  requiredSkills     String?
+  preferredSkills    String?
   requiredExperience String?
   workMode           String?
   jobType            String?
@@ -674,51 +679,50 @@ model AIJobAnalysis {
   vacancyEvidence    String?
   hiringUrgency      String?
   hiringDemand       String?
-  
   matchScore         Float?
-  matchingSkills     String?  // JSON array
-  missingSkills      String?  // JSON array
+  matchingSkills     String?
+  missingSkills      String?
   matchReason        String?
   applicationMessage String?
   coverLetter        String?
-  
   model              String?
-  status             String   @default("Completed")
+  status             String            @default("Completed")
   errorMessage       String?
-  
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  candidateProfile   CandidateProfile? @relation(fields: [candidateProfileId], references: [id])
+  job                Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model APIUsage {
   id            String   @id @default(uuid())
   userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider      String   // Adzuna, OpenRouter
+  provider      String
   endpoint      String?
   requestCount  Int      @default(1)
   tokenUsage    Int      @default(0)
   estimatedCost Float    @default(0.0)
   status        String   @default("Success")
-  
   createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model SchedulingDecision {
-  id               String   @id @default(uuid())
-  userId           String
-  campaignId       String
-  leadId           String?
-  candidateId      String?
-  emailSequenceId  String
+  id                String    @id @default(uuid())
+  userId            String
+  campaignId        String
+  leadId            String?
+  candidateId       String?
+  emailSequenceId   String
   recommendedSendAt DateTime
-  finalSendAt      DateTime?
-  timezone         String
-  reason           String?
-  source           String // AI or Human
-  userModified     Boolean  @default(false)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  finalSendAt       DateTime?
+  timezone          String
+  reason            String?
+  source            String
+  userModified      Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 }
 
 model AIActionLog {
@@ -730,8 +734,8 @@ model AIActionLog {
   actionType    String
   decision      String
   riskLevel     String   @default("Low")
-  inputSummary  String?  // JSON
-  outputSummary String?  // JSON
+  inputSummary  String?
+  outputSummary String?
   status        String   @default("Completed")
   createdAt     DateTime @default(now())
 }
@@ -739,14 +743,66 @@ model AIActionLog {
 model CompanyFilterPreset {
   id          String   @id @default(uuid())
   userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
   name        String
   description String?
-  filters     String   // JSON string
+  filters     String
   isDefault   Boolean  @default(false)
-  
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+model KnowledgeBaseFile {
+  id            String    @id @default(cuid())
+  userId        String
+  campaignId    String?
+  fileName      String
+  fileType      String
+  fileSize      Int
+  storageUrl    String?
+  extractedText String?
+  summary       String?
+  status        String    @default("Processing")
+  errorMessage  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  campaign      Campaign? @relation(fields: [campaignId], references: [id])
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([campaignId])
+}
+
+model GoogleCalendarIntegration {
+  id                     String    @id @default(cuid())
+  userId                 String    @unique
+  googleEmail            String?
+  accessTokenEncrypted   String?
+  refreshTokenEncrypted  String?
+  tokenExpiry            DateTime?
+  calendarId             String?
+  calendarName           String?
+  connected              Boolean   @default(false)
+  defaultDurationMinutes Int       @default(30)
+  timezone               String?   @default("America/New_York")
+  workingDays            String?   @default("MON,TUE,WED,THU,FRI")
+  workingHourStart       String?   @default("09:00")
+  workingHourEnd         String?   @default("17:00")
+  bufferMinutes          Int       @default(15)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SuggestedCalendarSlot {
+  id         String   @id @default(cuid())
+  replyId    String
+  userId     String
+  campaignId String?
+  leadId     String?
+  start      DateTime
+  end        DateTime
+  label      String
+  selected   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}

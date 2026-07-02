@@ -165,7 +165,7 @@ Title: ${job.title}
 Desc: ${job.description.substring(0, 1000)}
 
 Please return a concise 2-sentence summary of the role and any core skills.`;
-               const aiSummary = await generateText(openRouterKey, prompt, process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini');
+               const aiSummary = await generateText(openRouterKey, prompt, process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash');
                job.aiSummary = aiSummary;
                await prisma.job.update({
                   where: { id: job.id },

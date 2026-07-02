@@ -3,11 +3,11 @@ import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { sendCampaignEmail } from '@/lib/email-dispatch';
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const campaignId = params.id;
+  const campaignId = (await params).id;
 
   try {
     const campaign = await prisma.campaign.findUnique({

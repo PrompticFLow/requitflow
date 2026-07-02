@@ -7,7 +7,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const openrouterKey = process.env.OPENROUTER_API_KEY;
-  const openrouterModel = process.env.OPENROUTER_MODEL || 'google/gemini-2.0-flash-lite';
+  const openrouterModel = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
 
   if (!openrouterKey) {
     return NextResponse.json({
@@ -17,13 +17,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   try {
     const { id } = await params;
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      return NextResponse.json({ success: false, error: "Email draft ID is missing." }, { status: 400 });
+    }
 
-    const existing = await prisma.emailSequence.findUnique({
-      where: { id },
+    const existing = await prisma.emailSequence.findFirst({
+      where: { id, userId: user.id },
       include: { lead: true, campaign: true }
     });
 
-    if (!existing || existing.userId !== user.id) {
+    if (!existing) {
       return NextResponse.json({ error: 'Email draft not found.' }, { status: 404 });
     }
 
@@ -33,14 +36,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       ? `Use this proof/case study if relevant: "${campaign.proofCaseStudy}"`
       : `No proof provided. Do NOT invent or fabricate any statistics, client names, or results.`;
 
-    const prompt = `You are an expert cold email strategist for a recruitment agency.
+    const prompt = `You are an expert AI outbound sales agent.
 Rewrite Email Step ${existing.sequenceStep} (${existing.name || existing.emailType || 'Follow-up'}) for this lead.
 
 ${proofInstruction}
 
 Campaign Context:
 - Goal: ${campaign.goal || 'Book a discovery call'}
-- Offer: ${campaign.offer || 'Recruitment services'}
+- Offer: ${campaign.offer || 'Our services'}
 - Tone: ${campaign.tone || 'Professional'}
 - Language: ${campaign.language || 'English'}
 - CTA Style: ${campaign.ctaStyle || 'Soft'}

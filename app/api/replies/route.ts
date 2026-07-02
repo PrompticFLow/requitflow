@@ -16,7 +16,13 @@ export async function GET(req: Request) {
       orderBy: { createdAt: 'desc' }
     });
 
-    return NextResponse.json({ replies });
+    const mappedReplies = replies.map(r => ({
+      ...r,
+      emailBody: r.body,
+      aiCategory: r.classification || 'Unknown'
+    }));
+
+    return NextResponse.json({ replies: mappedReplies });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Internal error' }, { status: 500 });
   }

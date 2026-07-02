@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Search, Loader2, Download, Plus, X } from "lucide-react";
+import { AiAgentWorking } from "@/components/ui/ai-agent-working";
 
 export default function GenerateLeadsPage() {
   const [loading, setLoading] = useState(false);
@@ -23,7 +24,7 @@ export default function GenerateLeadsPage() {
     e.preventDefault();
     setLoading(true);
     setError("");
-    setProgress("Starting Apify Google Maps Scraper...");
+    setProgress("AI Agent is searching live business leads...");
     setSelectedLeads([]);
     setLeads([]);
     
@@ -41,7 +42,7 @@ export default function GenerateLeadsPage() {
           return;
         }
         if (data.error && data.error.includes("Apify token missing")) {
-          throw new Error("Apify API Token is missing. Please configure your integration settings.");
+          throw new Error("AI Agent data source is not connected. Please configure your integration settings.");
         }
         throw new Error(data.error || "Failed to start run");
       }
@@ -83,7 +84,7 @@ export default function GenerateLeadsPage() {
               url: l.googleMapsLink || 'N/A',
               score: l.leadScore || 0,
               tier: l.leadTier || "Cold",
-              insight: l.aiInsight || "Potential recruitment client based on public business presence and available contact details.",
+              insight: l.aiInsight || "Potential client based on public business presence and available contact details.",
               status: l.status || "New"
             })));
           } else {
@@ -178,7 +179,7 @@ export default function GenerateLeadsPage() {
     <div className="space-y-6">
       <div>
         <h2 className="text-3xl font-bold text-white mb-2">Find Client Leads</h2>
-        <p className="text-slate-400">Find hiring companies and potential recruitment clients instantly.</p>
+        <p className="text-slate-400">Find and generate potential B2B client leads instantly.</p>
       </div>
 
       <div className="glass p-8 rounded-2xl border border-slate-700/50">
@@ -218,8 +219,7 @@ export default function GenerateLeadsPage() {
 
         {loading && !error && (
           <div className="mt-8 p-6 bg-slate-900/50 rounded-xl border border-blue-500/20 flex flex-col items-center justify-center space-y-4">
-            <Loader2 className="animate-spin text-blue-500" size={32} />
-            <p className="text-blue-400 font-medium animate-pulse">{progress}</p>
+            <AiAgentWorking text={progress} />
           </div>
         )}
       </div>
@@ -318,7 +318,7 @@ export default function GenerateLeadsPage() {
               <X size={20} />
             </button>
             <h3 className="text-2xl font-bold text-white mb-2">Add to Campaign</h3>
-            <p className="text-slate-400 mb-6">Select a recruitment campaign to enroll {selectedLeads.length} leads.</p>
+            <p className="text-slate-400 mb-6">Select a campaign to enroll {selectedLeads.length} leads.</p>
             
             <div className="space-y-4">
               <select 

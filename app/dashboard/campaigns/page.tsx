@@ -1,44 +1,21 @@
 "use client";
 import { useState, useEffect } from "react";
 import { Plus, Play, Pause, Square, MoreVertical, Loader2, Trash2, Edit2, Target } from "lucide-react";
+import CreateCampaignModal from "./CreateCampaignModal";
 
 export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [newCampaign, setNewCampaign] = useState({ name: "", goal: "" });
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
+  const [initialModalData, setInitialModalData] = useState<any>(null);
 
-  const handleCreateCampaign = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newCampaign.name) return;
-    setCreating(true);
-    try {
-      const url = editingCampaignId ? `/api/campaigns/${editingCampaignId}` : "/api/campaigns";
-      const method = editingCampaignId ? "PATCH" : "POST";
-      
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newCampaign),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setShowModal(false);
-        setNewCampaign({ name: "", goal: "" });
-        setEditingCampaignId(null);
-        fetchCampaigns();
-      } else {
-        alert(data.error || "Failed to save campaign. Check terminal logs.");
-      }
-    } catch (err: any) {
-      alert("Error: " + err.message);
-      console.error(err);
-    } finally {
-      setCreating(false);
-    }
+  const handleModalSuccess = () => {
+    setShowModal(false);
+    setInitialModalData(null);
+    setEditingCampaignId(null);
+    fetchCampaigns();
   };
 
   const updateStatus = async (id: string, status: string) => {
@@ -106,13 +83,13 @@ export default function CampaignsPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-end">
         <div>
-          <h2 className="text-3xl font-bold text-white mb-2">Recruitment Campaigns</h2>
-          <p className="text-slate-400">Manage your automated recruitment campaigns for hiring companies and candidates.</p>
+          <h2 className="text-3xl font-bold text-white mb-2">Campaigns</h2>
+          <p className="text-slate-400">Manage your automated outreach campaigns for prospects and leads.</p>
         </div>
         <button 
           onClick={() => {
             setEditingCampaignId(null);
-            setNewCampaign({ name: "", goal: "" });
+            setInitialModalData(null);
             setShowModal(true);
           }}
           className="flex items-center space-x-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-all shadow-lg shadow-blue-500/25"
@@ -132,11 +109,11 @@ export default function CampaignsPage() {
             <Target size={36} className="text-blue-400" />
           </div>
           <h3 className="text-2xl font-bold text-white mb-3">No campaigns created yet.</h3>
-          <p className="text-slate-400 max-w-md mb-8">Create your first recruitment campaign to start automating your outreach.</p>
+          <p className="text-slate-400 max-w-md mb-8">Create your first campaign to start automating your outreach.</p>
           <button 
             onClick={() => {
               setEditingCampaignId(null);
-              setNewCampaign({ name: "", goal: "" });
+              setInitialModalData(null);
               setShowModal(true);
             }}
             className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-lg font-medium transition-all shadow-lg shadow-blue-500/25 flex items-center space-x-2"
@@ -160,11 +137,16 @@ export default function CampaignsPage() {
               <div className="absolute top-12 right-6 w-40 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-20 py-2 animate-in fade-in zoom-in-95 duration-200">
                 <button 
                   className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-white flex items-center space-x-2 transition-colors"
-                  onClick={() => {
-                    setEditingCampaignId(camp.id);
-                    setNewCampaign({ name: camp.name, goal: camp.goal || "" });
-                    setShowModal(true);
-                    setOpenDropdownId(null);
+                  onClick={async () => {
+                    // Fetch full campaign details for editing
+                    const res = await fetch(`/api/campaigns/${camp.id}`);
+                    const data = await res.json();
+                    if (data.campaign) {
+                      setInitialModalData(data.campaign);
+                      setEditingCampaignId(camp.id);
+                      setShowModal(true);
+                      setOpenDropdownId(null);
+                    }
                   }}
                 >
                   <Edit2 size={14} />
@@ -236,54 +218,17 @@ export default function CampaignsPage() {
         </div>
       )}
 
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="glass bg-slate-900 border border-slate-700/50 p-6 rounded-2xl w-full max-w-md shadow-2xl">
-            <h3 className="text-xl font-bold text-white mb-4">
-              {editingCampaignId ? "Edit Campaign" : "Create New Campaign"}
-            </h3>
-            <form onSubmit={handleCreateCampaign} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-400 mb-1">Campaign Name</label>
-                <input
-                  type="text"
-                  required
-                  value={newCampaign.name}
-                  onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })}
-                  placeholder="e.g. Q3 Client Outreach"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-400 mb-1">Campaign Goal (Optional)</label>
-                <input
-                  type="text"
-                  value={newCampaign.goal}
-                  onChange={(e) => setNewCampaign({ ...newCampaign, goal: e.target.value })}
-                  placeholder="e.g. Book 10 client discovery calls"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <div className="flex space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={creating || !newCampaign.name}
-                  className="flex-1 flex justify-center items-center px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg font-medium transition shadow-lg shadow-blue-500/25"
-                >
-                  {creating ? <Loader2 size={18} className="animate-spin" /> : (editingCampaignId ? "Save Changes" : "Create")}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <CreateCampaignModal
+        isOpen={showModal}
+        onClose={() => {
+          setShowModal(false);
+          setInitialModalData(null);
+          setEditingCampaignId(null);
+        }}
+        onSuccess={handleModalSuccess}
+        initialData={initialModalData}
+        editingId={editingCampaignId}
+      />
     </div>
   );
 }

@@ -21,14 +21,14 @@ export async function POST(req: Request) {
 
   if (!campaign || !lead) return NextResponse.json({ error: 'Campaign or Lead not found' }, { status: 404 });
 
-  const prompt = `You are an expert B2B cold email copywriter for recruitment agencies. Create a personalized email sequence for this lead. 
+  const prompt = `You are an expert B2B outbound sales copywriter. Create a personalized email sequence for this lead.
 The goal is: ${campaign.goal}. 
 Lead details:
 Name: ${(lead as any).businessName}
 Location: ${(lead as any).location}
 Category: ${(lead as any).category}
 AI Insight: ${(lead as any).aiInsight}
-Sender info: ${settings?.smtpFromName || 'Recruiter'} from ${(user as any).companyName || 'our company'}.
+Sender info: ${settings?.smtpFromName || 'Sales Team'} from ${(user as any).companyName || 'our company'}.
 Booking link: ${settings?.bookingLink || ''}
 
 Keep it short, human, and professional. Output exactly 3 steps in JSON array format: [{ "subject": "...", "body": "..." }]`;

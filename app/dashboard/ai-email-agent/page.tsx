@@ -44,12 +44,14 @@ type ReadinessItem = { key: string; label: string; passed: boolean; actionHint: 
 // ─── Default wizard state ────────────────────────────────────────────────────
 const defaultWizard = {
   // Step 1
-  name: "", campaignType: "Client Outreach", language: "English",
-  tone: "Professional", senderEmail: "", goal: "",
+  name: "Client Outreach Campaign", clientName: "Track2Digital", industry: "AI Automation", campaignType: "Client Outreach", language: "English",
+  tone: "Professional, warm, direct", senderEmail: "", goal: "Book Discovery Call", targetLocation: "",
   // Step 3
-  targetAudience: "", offer: "", problemSolved: "", mainBenefit: "",
-  proofCaseStudy: "", ctaType: "Book Discovery Call", bookingLink: "",
+  targetAudience: "Small business owners in the United States", offer: "AI follow-up automation and call booking system", problemSolved: "Leads are lost because follow-up is slow or manual", desiredOutcome: "More qualified booked calls with less manual work",
+  trustReason: "", proofCaseStudy: "", callToAction: "Book a 15-minute strategy call", bookingGoal: "",
+  commonObjections: "", doNotMention: "", personalizationStyle: "Professional", followUpStyle: "Value-driven",
   unsubscribeLine: "To unsubscribe, reply with STOP.",
+  mainBenefit: "", ctaType: "", bookingLink: "https://calendly.com/demo/strategy-call",
   // Step 4 — sequence
   followUpCount: 5,
   sequenceSteps: [
@@ -114,8 +116,42 @@ function InputField({ label, helper, required, children }: { label: string; help
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
+async function parseApiResponse(response: Response) {
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let data: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      throw new Error(
+        `Invalid JSON response: ${rawText.slice(0, 300)}`
+      );
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      data?.technicalError ||
+        data?.error ||
+        `Request failed: ${response.status} ${rawText.slice(0, 300) || "Empty response"}`
+    );
+  }
+
+  if (!data) {
+    throw new Error(
+      `Empty JSON response from API. Status: ${response.status}`
+    );
+  }
+
+  return data;
+}
+
 export default function AIEmailAgentPage() {
   const [activeTab, setActiveTab] = useState<"hub" | "pending">("hub");
+  const [authError, setAuthError] = useState(false);
 
   // — Campaign Hub state
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -149,6 +185,9 @@ export default function AIEmailAgentPage() {
   // — Generate confirm
   const [generateModalId, setGenerateModalId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+
+  // — Active AI Provider
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
 
   // — Readiness modal
   const [readinessModal, setReadinessModal] = useState<{ open: boolean; campaignId: string | null; items: ReadinessItem[] }>({
@@ -185,16 +224,32 @@ export default function AIEmailAgentPage() {
   const [bulkModal, setBulkModal] = useState<{ open: boolean; action: string; count: number } | null>(null);
   const [bulkProcessing, setBulkProcessing] = useState(false);
 
+  // — Delete email state
+  const [deletingEmailId, setDeletingEmailId] = useState<string | null>(null);
+
   // ─── Data fetching ────────────────────────────────────────────────────────
   const fetchCampaigns = useCallback(async () => {
     setFetchingCampaigns(true);
     try {
-      const res = await fetch("/api/campaigns");
-      if (res.status === 401) { window.location.href = "/login"; return; }
-      const data = await res.json();
-      if (data.campaigns) setCampaigns(data.campaigns);
+      const res = await fetch("/api/campaigns", { credentials: "include" });
+      if (res.status === 401) { setAuthError(true); return; }
+      console.log("AI EMAIL AGENT FETCH CAMPAIGNS URL:", res.url);
+      const data = await parseApiResponse(res);
+      const fetchedCampaigns = Array.isArray(data) ? data : data.campaigns || data.data || [];
+      if (!data.success && data.error) {
+        throw new Error(data.error || "Failed to fetch campaigns.");
+      }
+      setCampaigns(fetchedCampaigns);
     } catch (err) { console.error(err); }
     finally { setFetchingCampaigns(false); }
+  }, []);
+
+  const fetchProvider = useCallback(async () => {
+    try {
+      const res = await fetch("/api/ai/provider", { credentials: "include" });
+      const data = await parseApiResponse(res);
+      setActiveProvider(data.provider);
+    } catch { }
   }, []);
 
   const fetchEmails = useCallback(async () => {
@@ -205,9 +260,9 @@ export default function AIEmailAgentPage() {
       if (emailCampaignFilter !== "All") params.set("campaignId", emailCampaignFilter);
       if (emailStepFilter !== "All") params.set("step", emailStepFilter);
       if (emailSearch) params.set("search", emailSearch);
-      const res = await fetch(`/api/email-sequences/pending-review?${params}`);
-      if (res.status === 401) { window.location.href = "/login"; return; }
-      const data = await res.json();
+      const res = await fetch(`/api/email-sequences/pending-review?${params}`, { credentials: "include" });
+      if (res.status === 401) { setAuthError(true); return; }
+      const data = await parseApiResponse(res);
       if (data.pendingEmails) setPendingEmails(data.pendingEmails);
     } catch (err) { console.error(err); }
     finally { setFetchingEmails(false); }
@@ -216,13 +271,14 @@ export default function AIEmailAgentPage() {
   useEffect(() => {
     if (activeTab === "hub") fetchCampaigns();
     else fetchEmails();
-  }, [activeTab, fetchCampaigns, fetchEmails]);
+    fetchProvider();
+  }, [activeTab, fetchCampaigns, fetchEmails, fetchProvider]);
 
   const fetchWizardLeads = useCallback(async () => {
     setWizardLeadsLoading(true);
     try {
-      const res = await fetch("/api/leads?limit=500");
-      const data = await res.json();
+      const res = await fetch("/api/leads?limit=500", { credentials: "include" });
+      const data = await parseApiResponse(res);
       if (data.leads) setWizardLeads(data.leads);
     } catch { }
     finally { setWizardLeadsLoading(false); }
@@ -292,12 +348,15 @@ export default function AIEmailAgentPage() {
         await fetch(`/api/campaigns/${wizardCampaignId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({
             targetAudience: wizardData.targetAudience, offer: wizardData.offer,
-            problemSolved: wizardData.problemSolved, mainBenefit: wizardData.mainBenefit,
-            proofCaseStudy: wizardData.proofCaseStudy, ctaType: wizardData.ctaType,
+            problemSolved: wizardData.problemSolved, desiredOutcome: wizardData.desiredOutcome,
+            proofCaseStudy: wizardData.proofCaseStudy, callToAction: wizardData.callToAction,
             bookingLink: wizardData.bookingLink, ctaLink: wizardData.bookingLink,
             unsubscribeLine: wizardData.unsubscribeLine,
+            clientName: wizardData.clientName, industry: wizardData.industry, targetLocation: wizardData.targetLocation,
+            trustReason: wizardData.trustReason, commonObjections: wizardData.commonObjections, doNotMention: wizardData.doNotMention
           })
         });
       } catch { }
@@ -311,6 +370,7 @@ export default function AIEmailAgentPage() {
         await fetch(`/api/campaigns/${wizardCampaignId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({
             personalizationLevel: wizardData.personalizationLevel,
             emailLength: wizardData.emailLength, spamSafety: wizardData.spamSafety,
@@ -335,14 +395,19 @@ export default function AIEmailAgentPage() {
       const res = await fetch(`/api/campaigns/${wizardCampaignId}/generate-email-sequence`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ leadIds: selectedLeadIds })
       });
       const data = await res.json();
       if (res.ok) {
+        let msg = data.message || `AI created ${data.totalDrafts || 0} drafts. Review and approve Email 1 before starting.`;
+        if (data.fallbackCreated > 0) {
+          msg = "Some AI responses were invalid, so safe fallback drafts were created for review. " + msg;
+        }
         setGenerationProgress({
           total: selectedLeadIds.length,
-          done: data.successCount || selectedLeadIds.length,
-          message: data.message || `AI created ${data.totalDrafts || 0} drafts. Review and approve Email 1 before starting.`
+          done: data.created || selectedLeadIds.length,
+          message: msg
         });
         fetchCampaigns();
       } else {
@@ -366,7 +431,10 @@ export default function AIEmailAgentPage() {
     if (!deleteModalId) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/campaigns/${deleteModalId}`, { method: "DELETE" });
+      const res = await fetch(`/api/campaigns/${deleteModalId}`, { 
+        method: "DELETE",
+        credentials: "include"
+      });
       if (res.ok) { setDeleteModalId(null); fetchCampaigns(); }
       else { const d = await res.json(); alert(d.error || "Failed to delete campaign."); }
     } catch { alert("An error occurred."); }
@@ -379,7 +447,8 @@ export default function AIEmailAgentPage() {
       const res = await fetch(`/api/campaigns/${id}/generate-email-sequence`, { method: "POST" });
       const data = await res.json();
       if (res.ok) {
-        alert(data.message || "Emails generated successfully! Switch to Pending Email Reviews to review them.");
+        const msg = data.message || "Emails generated successfully! Switch to Pending Email Reviews to review them.";
+        alert(msg);
         fetchCampaigns();
       } else {
         alert(data.error || "Failed to generate emails.");
@@ -396,10 +465,20 @@ export default function AIEmailAgentPage() {
       if (res.ok) {
         setStartConfirmId(null);
         fetchCampaigns();
-        alert(`Campaign started! ${data.scheduledCount || 0} emails have been scheduled.`);
+        if (data.email1Sent) {
+          alert("Campaign started! Email 1 was sent immediately. Follow-ups are scheduled.");
+        } else if (data.email1Queued) {
+          alert("Campaign started! Email 1 is queued to send immediately. Follow-ups are scheduled.");
+        } else {
+          alert(`Campaign started! ${data.scheduled || 0} emails have been scheduled.`);
+        }
       } else {
         setStartConfirmId(null);
-        setReadinessModal({ open: true, campaignId: id, items: data.items || [] });
+        if (data.error) {
+          alert(data.error);
+        } else {
+          setReadinessModal({ open: true, campaignId: id, items: data.items || [] });
+        }
       }
     } catch { alert("An error occurred while starting the campaign."); }
     finally { setStarting(false); }
@@ -407,7 +486,10 @@ export default function AIEmailAgentPage() {
 
   const handlePauseCampaign = async (id: string) => {
     try {
-      const res = await fetch(`/api/campaigns/${id}/pause`, { method: "POST" });
+      const res = await fetch(`/api/campaigns/${id}/pause`, { 
+        method: "POST",
+        credentials: "include" 
+      });
       if (res.ok) fetchCampaigns();
       else { const d = await res.json(); alert(d.error || "Failed to pause campaign."); }
     } catch { alert("An error occurred."); }
@@ -433,6 +515,7 @@ export default function AIEmailAgentPage() {
 
   // ─── Email actions ────────────────────────────────────────────────────────
   const handleApproveEmail = async (id: string) => {
+    if (!id) { alert("Email draft ID is missing. Please refresh and try again."); return; }
     try {
       const res = await fetch(`/api/email-sequences/${id}/approve`, { method: "POST" });
       if (res.ok) fetchEmails();
@@ -441,6 +524,7 @@ export default function AIEmailAgentPage() {
   };
 
   const handleRejectEmail = async (id: string) => {
+    if (!id) { alert("Email draft ID is missing. Please refresh and try again."); return; }
     try {
       const res = await fetch(`/api/email-sequences/${id}/reject`, { method: "POST" });
       if (res.ok) fetchEmails();
@@ -448,8 +532,30 @@ export default function AIEmailAgentPage() {
     } catch { alert("An error occurred."); }
   };
 
+  const handleDeleteEmail = async (id: string) => {
+    if (!id) { alert("Email draft ID is missing. Please refresh and try again."); return; }
+    const confirmed = window.confirm("Are you sure you want to delete this email review? This cannot be undone.");
+    if (!confirmed) return;
+    setDeletingEmailId(id);
+    try {
+      const res = await fetch(`/api/email-sequences/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setPendingEmails(prev => prev.filter(e => e.id !== id));
+        setSelectedEmailIds(prev => prev.filter(sid => sid !== id));
+        fetchCampaigns();
+      } else {
+        alert(data.error || "Failed to delete email review.");
+      }
+    } catch { alert("An error occurred while deleting."); }
+    finally { setDeletingEmailId(null); }
+  };
+
   const handleSaveEditEmail = async (approve: boolean) => {
-    if (!editEmailModal.email) return;
+    if (!editEmailModal.email || !editEmailModal.email.id) {
+      alert("Email draft ID is missing. Please refresh and try again.");
+      return;
+    }
     if (!editSubject.trim()) { alert("Subject cannot be empty."); return; }
     if (!editBody.trim()) { alert("Body cannot be empty."); return; }
     setEmailSaving(true);
@@ -468,7 +574,10 @@ export default function AIEmailAgentPage() {
   };
 
   const handleRegenerateEmail = async () => {
-    if (!regenModal.email) return;
+    if (!regenModal.email || !regenModal.email.id) {
+      alert("Email draft ID is missing. Please refresh and try again.");
+      return;
+    }
     setRegenerating(true);
     try {
       const res = await fetch(`/api/email-sequences/${regenModal.email.id}/regenerate`, { method: "POST" });
@@ -480,10 +589,17 @@ export default function AIEmailAgentPage() {
 
   const handleBulkConfirm = async () => {
     if (!bulkModal) return;
+    
+    const validIds = selectedEmailIds.filter(Boolean);
+    if (validIds.length === 0) {
+      alert("Select drafts first.");
+      return;
+    }
+
     setBulkProcessing(true);
     let approved = 0, skipped = 0, errors = 0;
     try {
-      for (const id of selectedEmailIds) {
+      for (const id of validIds) {
         try {
           let res: Response;
           if (bulkModal.action === "approve") {
@@ -530,12 +646,33 @@ export default function AIEmailAgentPage() {
   const totalDraftCount = selectedLeadIds.length * activeSteps;
 
   // ─── Render ───────────────────────────────────────────────────────────────
+  if (authError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <AlertTriangle className="h-12 w-12 text-amber-500 mb-4" />
+        <h2 className="text-xl font-semibold text-white mb-2">Your session expired</h2>
+        <p className="text-slate-400 mb-6 max-w-md">Please log in again to access the AI Email Agent and manage your campaigns.</p>
+        <Link href="/login" className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
+          Go to Login
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* ── Header ── */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
-          <h2 className="text-3xl font-bold text-white mb-2">AI Email Agent</h2>
+          <div className="flex items-center gap-3 mb-2">
+            <h2 className="text-3xl font-bold text-white">AI Email Agent</h2>
+            {activeProvider && (
+              <span className={`px-2 py-1 text-xs font-medium rounded-full border ${activeProvider === 'NVIDIA' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>
+                <Sparkles size={12} className="inline mr-1" />
+                {activeProvider} API
+              </span>
+            )}
+          </div>
           <p className="text-slate-400 max-w-2xl">Create campaigns, select leads, generate AI email drafts, review them, and launch safely. Nothing sends without your approval.</p>
         </div>
         <div className="flex gap-3 flex-wrap">
@@ -600,7 +737,7 @@ export default function AIEmailAgentPage() {
                 <Target size={36} className="text-purple-400" />
               </div>
               <h3 className="text-xl font-semibold text-white mb-2">No campaigns yet</h3>
-              <p className="text-slate-400 max-w-sm mb-6">Create your first AI-powered outreach campaign and review emails before sending.</p>
+              <p className="text-slate-400 max-w-sm mb-6">Create your first client outreach campaign.</p>
               <button onClick={openWizard} className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition-colors">
                 Create Campaign
               </button>
@@ -822,8 +959,8 @@ export default function AIEmailAgentPage() {
                           <div className="w-16 h-16 bg-slate-800/50 rounded-full flex items-center justify-center mb-4">
                             <Mail size={28} className="text-slate-500" />
                           </div>
-                          <h3 className="text-lg font-medium text-white mb-2">No emails waiting for review</h3>
-                          <p className="text-slate-400 max-w-sm mb-5">Generate AI email drafts from a campaign to review and approve them here.</p>
+                          <h3 className="text-lg font-medium text-white mb-2">No email reviews yet</h3>
+                          <p className="text-slate-400 max-w-sm mb-5">Generate AI emails to review before sending.</p>
                           <button onClick={() => setActiveTab("hub")} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-lg text-sm">
                             Go to Campaign Hub
                           </button>
@@ -888,6 +1025,13 @@ export default function AIEmailAgentPage() {
                                 className="p-1.5 bg-purple-500/10 text-purple-400 rounded-lg hover:bg-purple-500/20 border border-purple-500/20" title="Regenerate">
                                 <RefreshCw size={14} />
                               </button>
+                              {email.status !== "Sent" && (
+                                <button id={`btn-delete-email-${email.id}`} onClick={() => handleDeleteEmail(email.id)}
+                                  disabled={deletingEmailId === email.id}
+                                  className="p-1.5 bg-red-500/10 text-red-400 rounded-lg hover:bg-red-600 hover:text-white border border-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors" title="Delete">
+                                  {deletingEmailId === email.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -933,21 +1077,39 @@ export default function AIEmailAgentPage() {
                     <p className="text-sm text-slate-400">Tell AI who this campaign is for and what outcome you want.</p>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <InputField label="Campaign Name" required helper="e.g. Senior Tech Roles Q3">
+                    <InputField label="Campaign Name" required helper="e.g. Q3 Outreach">
                       <input type="text" value={wizardData.name}
                         onChange={e => setWizardData(d => ({ ...d, name: e.target.value }))}
-                        placeholder="e.g. Senior Tech Roles Q3"
+                        placeholder="e.g. Q3 Client Outreach"
+                        className="w-full px-3 py-2 rounded-xl text-sm" />
+                    </InputField>
+                    <InputField label="Business / Client Name" required helper="The name of the business sending emails">
+                      <input type="text" value={wizardData.clientName}
+                        onChange={e => setWizardData(d => ({ ...d, clientName: e.target.value }))}
+                        placeholder="e.g. Acme Corp"
+                        className="w-full px-3 py-2 rounded-xl text-sm" />
+                    </InputField>
+                    <InputField label="Industry / Niche" required helper="e.g. Real Estate, SaaS, Coaching">
+                      <input type="text" value={wizardData.industry}
+                        onChange={e => setWizardData(d => ({ ...d, industry: e.target.value }))}
+                        placeholder="e.g. Real Estate"
+                        className="w-full px-3 py-2 rounded-xl text-sm" />
+                    </InputField>
+                    <InputField label="Target Location" helper="e.g. United States, Florida, Global">
+                      <input type="text" value={wizardData.targetLocation}
+                        onChange={e => setWizardData(d => ({ ...d, targetLocation: e.target.value }))}
+                        placeholder="e.g. United States"
                         className="w-full px-3 py-2 rounded-xl text-sm" />
                     </InputField>
                     <InputField label="Campaign Type">
                       <select value={wizardData.campaignType} onChange={e => setWizardData(d => ({ ...d, campaignType: e.target.value }))} className="w-full px-3 py-2 rounded-xl text-sm">
-                        {["Client Outreach", "Hiring Company Outreach", "Candidate Outreach", "Staffing Outreach", "Executive Search Outreach", "HR Consultancy Outreach", "Re-Engagement"].map(o => <option key={o}>{o}</option>)}
+                        {["Client Outreach", "Sales Outreach", "Follow-up", "Re-Engagement", "Other"].map(o => <option key={o}>{o}</option>)}
                       </select>
                     </InputField>
                     <InputField label="Campaign Goal" helper="What do you want to achieve?">
                       <input type="text" value={wizardData.goal}
                         onChange={e => setWizardData(d => ({ ...d, goal: e.target.value }))}
-                        placeholder="e.g. Book discovery calls with hiring managers"
+                        placeholder="e.g. Book discovery calls"
                         className="w-full px-3 py-2 rounded-xl text-sm" />
                     </InputField>
                     <InputField label="Language">
@@ -955,15 +1117,10 @@ export default function AIEmailAgentPage() {
                         {["English", "Spanish", "French", "German", "Portuguese"].map(o => <option key={o}>{o}</option>)}
                       </select>
                     </InputField>
-                    <InputField label="Tone">
-                      <select value={wizardData.tone} onChange={e => setWizardData(d => ({ ...d, tone: e.target.value }))} className="w-full px-3 py-2 rounded-xl text-sm">
-                        {["Professional", "Friendly", "Confident", "Consultative"].map(o => <option key={o}>{o}</option>)}
-                      </select>
-                    </InputField>
                     <InputField label="Sender Email" helper="Email address emails will come from">
                       <input type="email" value={wizardData.senderEmail}
                         onChange={e => setWizardData(d => ({ ...d, senderEmail: e.target.value }))}
-                        placeholder="e.g. john@youragency.com"
+                        placeholder="e.g. john@yourbusiness.com"
                         className="w-full px-3 py-2 rounded-xl text-sm" />
                     </InputField>
                   </div>
@@ -1047,37 +1204,56 @@ export default function AIEmailAgentPage() {
                     <InputField label="Target Audience" helper="Who exactly is this campaign for?">
                       <input type="text" value={wizardData.targetAudience}
                         onChange={e => setWizardData(d => ({ ...d, targetAudience: e.target.value }))}
-                        placeholder="e.g. CTOs in Fintech startups"
+                        placeholder="e.g. Small business owners in USA"
                         className="w-full px-3 py-2 rounded-xl text-sm" />
                     </InputField>
-                    <InputField label="Your Offer">
+                    <InputField label="Offer / Service / Product">
                       <input type="text" value={wizardData.offer}
                         onChange={e => setWizardData(d => ({ ...d, offer: e.target.value }))}
-                        placeholder="e.g. 15% flat fee recruitment"
+                        placeholder="e.g. AI automation for customer service"
                         className="w-full px-3 py-2 rounded-xl text-sm" />
                     </InputField>
-                    <InputField label="Problem Solved">
+                    <InputField label="What problem do you solve?">
                       <input type="text" value={wizardData.problemSolved}
                         onChange={e => setWizardData(d => ({ ...d, problemSolved: e.target.value }))}
-                        placeholder="e.g. Stop wasting time on bad interviews"
+                        placeholder="e.g. Too much time spent on manual follow-ups"
                         className="w-full px-3 py-2 rounded-xl text-sm" />
                     </InputField>
-                    <InputField label="Main Benefit">
-                      <input type="text" value={wizardData.mainBenefit}
-                        onChange={e => setWizardData(d => ({ ...d, mainBenefit: e.target.value }))}
-                        placeholder="e.g. Hire top 1% talent in 14 days"
+                    <InputField label="Desired Result">
+                      <input type="text" value={wizardData.desiredOutcome}
+                        onChange={e => setWizardData(d => ({ ...d, desiredOutcome: e.target.value }))}
+                        placeholder="e.g. Save 10 hours a week and boost sales by 20%"
+                        className="w-full px-3 py-2 rounded-xl text-sm" />
+                    </InputField>
+                    <InputField label="Why should they trust you?">
+                      <input type="text" value={wizardData.trustReason}
+                        onChange={e => setWizardData(d => ({ ...d, trustReason: e.target.value }))}
+                        placeholder="e.g. We have 10 years of industry experience"
                         className="w-full px-3 py-2 rounded-xl text-sm" />
                     </InputField>
                     <InputField label="Proof / Case Study" helper="Optional. AI will NOT invent proof if left empty." >
                       <input type="text" value={wizardData.proofCaseStudy}
                         onChange={e => setWizardData(d => ({ ...d, proofCaseStudy: e.target.value }))}
-                        placeholder="e.g. Helped Stripe hire 5 engineers last quarter"
+                        placeholder="e.g. Helped TechCorp grow by 30% in 2 months"
                         className="w-full px-3 py-2 rounded-xl text-sm" />
                     </InputField>
-                    <InputField label="CTA Type">
-                      <select value={wizardData.ctaType} onChange={e => setWizardData(d => ({ ...d, ctaType: e.target.value }))} className="w-full px-3 py-2 rounded-xl text-sm">
-                        {["Book Discovery Call", "Reply to Email", "Candidate Screening Call", "Ask Hiring Need", "Share Candidate Requirement"].map(o => <option key={o}>{o}</option>)}
-                      </select>
+                    <InputField label="Main CTA">
+                      <input type="text" value={wizardData.callToAction}
+                        onChange={e => setWizardData(d => ({ ...d, callToAction: e.target.value }))}
+                        placeholder="e.g. Book a 15-minute strategy call"
+                        className="w-full px-3 py-2 rounded-xl text-sm" />
+                    </InputField>
+                    <InputField label="Common Objections" helper="Optional.">
+                      <input type="text" value={wizardData.commonObjections}
+                        onChange={e => setWizardData(d => ({ ...d, commonObjections: e.target.value }))}
+                        placeholder="e.g. We don't have budget, we already use a solution"
+                        className="w-full px-3 py-2 rounded-xl text-sm" />
+                    </InputField>
+                    <InputField label="Do Not Mention" helper="Optional. Topics AI should avoid.">
+                      <input type="text" value={wizardData.doNotMention}
+                        onChange={e => setWizardData(d => ({ ...d, doNotMention: e.target.value }))}
+                        placeholder="e.g. Don't mention pricing upfront"
+                        className="w-full px-3 py-2 rounded-xl text-sm" />
                     </InputField>
                     <InputField label="Booking Link" required helper="Required before campaign can start">
                       <input type="url" value={wizardData.bookingLink}
@@ -1355,9 +1531,12 @@ export default function AIEmailAgentPage() {
             </div>
             <div className="flex justify-end gap-3 pt-2">
               <button onClick={() => setGenerateModalId(null)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-sm">Cancel</button>
+              <button onClick={() => alert("Generate Full 25-Step Sequence will be available after preview.")} className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm flex items-center gap-2 transition-colors">
+                Generate Full 25-Step Sequence
+              </button>
               <button id="btn-confirm-generate" onClick={() => handleGenerateEmails(generateModalId!)} disabled={generating}
                 className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-medium flex items-center gap-2">
-                {generating && <Loader2 size={14} className="animate-spin" />} Generate Emails
+                {generating && <Loader2 size={14} className="animate-spin" />} Generate Preview Sequence
               </button>
             </div>
           </div>
@@ -1515,6 +1694,12 @@ export default function AIEmailAgentPage() {
                 className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-xl text-sm flex items-center gap-1">
                 <Check size={14} /> Approve
               </button>
+              {previewEmail.status !== "Sent" && (
+                <button onClick={() => { handleDeleteEmail(previewEmail.id); setPreviewEmail(null); }}
+                  className="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-600 hover:text-white rounded-xl text-sm flex items-center gap-1 transition-colors">
+                  <Trash2 size={14} /> Delete
+                </button>
+              )}
             </div>
           </div>
         </div>

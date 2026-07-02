@@ -6,7 +6,7 @@ export async function GET() {
     // Basic counts
     const clientLeadsFound = await prisma.lead.count({ where: { source: { not: "Candidate" } } });
     const candidatesFound = await prisma.lead.count({ where: { source: "Candidate" } });
-    const activeRecruitmentCampaigns = await prisma.campaign.count({ where: { status: "Active" } });
+    const activeCampaigns = await prisma.campaign.count({ where: { status: "Active" } });
     
     // Outreach metrics
     const emailsSent = await prisma.emailSequence.count({ where: { status: "Sent" } });
@@ -75,7 +75,7 @@ export async function GET() {
     return NextResponse.json({
       clientLeadsFound,
       candidatesFound,
-      activeRecruitmentCampaigns,
+      activeCampaigns,
       emailsSent,
       smsSent,
       repliesReceived,
@@ -94,7 +94,21 @@ export async function GET() {
     });
 
   } catch (error: any) {
-    console.error("Analytics Error:", error);
-    return NextResponse.json({ error: "Failed to load analytics data", details: error.message || error.toString() }, { status: 500 });
+    console.error("Dashboard analytics error:", error);
+    if (process.env.NEXT_PUBLIC_DEMO_MODE === 'true') {
+      return NextResponse.json({
+        clientLeadsFound: 0, candidatesFound: 0, activeCampaigns: 0, emailsSent: 0, smsSent: 0,
+        repliesReceived: 0, interestedReplies: 0, discoveryCallsBooked: 0, screeningCallsBooked: 0,
+        hotClientLeads: 0, warmClientLeads: 0, coldClientLeads: 0,
+        positiveReplyRate: "0.0%", callBookingRate: "0.0%",
+        noReplyCount: 0, unsubscribedCount: 0,
+        funnel: { added: 0, emailsSent: 0, replies: 0, interested: 0, booked: 0, won: 0 },
+        leadTrend: []
+      });
+    }
+    return NextResponse.json(
+      { error: "Failed to load dashboard metrics", details: error.message },
+      { status: 500 }
+    );
   }
 }

@@ -19,7 +19,7 @@ export default function PipelinePlaceholder() {
           </div>
           <div>
             <div className="flex items-center space-x-3">
-              <h1 className="text-2xl font-bold text-white">Recruitment Pipeline</h1>
+              <h1 className="text-2xl font-bold text-white">Sales Pipeline</h1>
               <span className="px-3 py-1 bg-blue-500/10 text-blue-400 text-xs font-semibold rounded-full border border-blue-500/20">
                 This feature is planned
               </span>

@@ -98,7 +98,7 @@ Return only valid JSON without markdown:
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: process.env.OPENROUTER_MODEL || 'google/gemini-1.5-pro',
+            model: process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
             messages: [{ role: 'user', content: prompt }],
             response_format: { type: 'json_object' }
           })

@@ -99,9 +99,7 @@ export async function sendCampaignEmail({
   if (emailSequence.status === 'Sent') {
     return { success: false, error: "Email has already been sent." };
   }
-  if (emailSequence.approvalStatus === 'Rejected') {
-    return { success: false, error: "Email sequence has been rejected." };
-  }
+
   if (!subject || subject.trim() === '') {
     return { success: false, error: "Email subject cannot be empty." };
   }

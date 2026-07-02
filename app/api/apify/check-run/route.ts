@@ -74,7 +74,7 @@ export async function POST(req: Request) {
     // Save leads to database and generate AI insights concurrently
     const createdLeads = [];
     const openrouterKey = process.env.OPENROUTER_API_KEY;
-    const openrouterModel = process.env.OPENROUTER_MODEL || "google/gemini-1.5-pro";
+    const openrouterModel = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
 
     const processLead = async (item: any) => {
       // Basic scoring logic
