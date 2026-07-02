@@ -516,6 +516,18 @@ If the model cannot generate, return: {"emails": []}`;
     ];
 
     let userMessage = error?.message || '';
+    if (userMessage === 'Google AI API key is not configured or invalid.') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "AI generation is not connected.",
+          technicalError: "Missing GEMINI_API_KEY.",
+          action: "Add a valid GEMINI_API_KEY to .env.local and restart the server.",
+        },
+        { status: 400 }
+      );
+    }
+
     if (!safeErrors.includes(userMessage)) {
       userMessage = 'Draft generation failed. Please try again.';
     }
