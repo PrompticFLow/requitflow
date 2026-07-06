@@ -45,7 +45,7 @@ type ReadinessItem = { key: string; label: string; passed: boolean; actionHint: 
 const defaultWizard = {
   // Step 1
   name: "Client Outreach Campaign", clientName: "Track2Digital", industry: "AI Automation", campaignType: "Client Outreach", language: "English",
-  tone: "Professional, warm, direct", senderEmail: "", goal: "Book Discovery Call", targetLocation: "",
+  tone: "Professional, warm, direct", senderEmail: "", senderName: "", goal: "Book Discovery Call", targetLocation: "",
   // Step 3
   targetAudience: "Small business owners in the United States", offer: "AI follow-up automation and call booking system", problemSolved: "Leads are lost because follow-up is slow or manual", desiredOutcome: "More qualified booked calls with less manual work",
   trustReason: "", proofCaseStudy: "", callToAction: "Book a 15-minute strategy call", bookingGoal: "",
@@ -427,11 +427,11 @@ export default function AIEmailAgentPage() {
   };
 
   // ─── Campaign actions ─────────────────────────────────────────────────────
-  const handleDelete = async () => {
+  const handleDelete = async (force: boolean = false) => {
     if (!deleteModalId) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/campaigns/${deleteModalId}`, { 
+      const res = await fetch(`/api/campaigns/${deleteModalId}${force ? '?force=true' : ''}`, { 
         method: "DELETE",
         credentials: "include"
       });
@@ -444,7 +444,11 @@ export default function AIEmailAgentPage() {
   const handleGenerateEmails = async (id: string) => {
     setGenerating(true);
     try {
-      const res = await fetch(`/api/campaigns/${id}/generate-email-sequence`, { method: "POST" });
+      const res = await fetch(`/api/campaigns/${id}/generate-email-sequence`, { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preview: true })
+      });
       const data = await res.json();
       if (res.ok) {
         const msg = data.message || "Emails generated successfully! Switch to Pending Email Reviews to review them.";
@@ -475,7 +479,12 @@ export default function AIEmailAgentPage() {
       } else {
         setStartConfirmId(null);
         if (data.error) {
-          alert(data.error);
+          const missing = data.missingRequirements || data.missing;
+          if (missing && missing.length > 0) {
+            alert(`Failed to start campaign. Missing Requirements:\n\n- ${missing.join('\n- ')}`);
+          } else {
+            alert(data.error);
+          }
         } else {
           setReadinessModal({ open: true, campaignId: id, items: data.items || [] });
         }
@@ -666,12 +675,6 @@ export default function AIEmailAgentPage() {
         <div>
           <div className="flex items-center gap-3 mb-2">
             <h2 className="text-3xl font-bold text-white">AI Email Agent</h2>
-            {activeProvider && (
-              <span className={`px-2 py-1 text-xs font-medium rounded-full border ${activeProvider === 'NVIDIA' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>
-                <Sparkles size={12} className="inline mr-1" />
-                {activeProvider} API
-              </span>
-            )}
           </div>
           <p className="text-slate-400 max-w-2xl">Create campaigns, select leads, generate AI email drafts, review them, and launch safely. Nothing sends without your approval.</p>
         </div>
@@ -1114,14 +1117,8 @@ export default function AIEmailAgentPage() {
                     </InputField>
                     <InputField label="Language">
                       <select value={wizardData.language} onChange={e => setWizardData(d => ({ ...d, language: e.target.value }))} className="w-full px-3 py-2 rounded-xl text-sm">
-                        {["English", "Spanish", "French", "German", "Portuguese"].map(o => <option key={o}>{o}</option>)}
+                        {["English", "Spanish", "French", "German", "Portuguese", "Italian", "Dutch", "Russian", "Chinese", "Japanese", "Arabic", "Hindi", "Korean", "Turkish"].map(o => <option key={o}>{o}</option>)}
                       </select>
-                    </InputField>
-                    <InputField label="Sender Email" helper="Email address emails will come from">
-                      <input type="email" value={wizardData.senderEmail}
-                        onChange={e => setWizardData(d => ({ ...d, senderEmail: e.target.value }))}
-                        placeholder="e.g. john@yourbusiness.com"
-                        className="w-full px-3 py-2 rounded-xl text-sm" />
                     </InputField>
                   </div>
                 </div>
@@ -1340,7 +1337,7 @@ export default function AIEmailAgentPage() {
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     {[
                       { label: "Personalization Level", key: "personalizationLevel", options: ["Low", "Medium", "High"] },
-                      { label: "Email Length", key: "emailLength", options: ["Very Short", "Short", "Detailed"] },
+                      { label: "Email Length", key: "emailLength", options: ["Very Short", "Short", "Detailed", "Big"] },
                       { label: "Spam Safety", key: "spamSafety", options: ["Normal", "High"] },
                       { label: "CTA Style", key: "ctaStyle", options: ["Soft", "Direct"] },
                       { label: "Tone", key: "tone", options: ["Professional", "Friendly", "Confident", "Consultative"] },
@@ -1506,7 +1503,13 @@ export default function AIEmailAgentPage() {
             )}
             <div className="flex justify-end gap-3 pt-2">
               <button onClick={() => setDeleteModalId(null)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-sm">Cancel</button>
-              <button id="btn-confirm-delete" onClick={handleDelete} disabled={deleting}
+              {deleteHasSent && (
+                <button onClick={() => handleDelete(true)} disabled={deleting}
+                  className="px-5 py-2 bg-red-900/50 hover:bg-red-800/80 text-red-200 border border-red-500/30 rounded-xl text-sm font-medium transition-colors">
+                  Force Delete
+                </button>
+              )}
+              <button id="btn-confirm-delete" onClick={() => handleDelete(false)} disabled={deleting}
                 className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-sm font-medium flex items-center gap-2">
                 {deleting && <Loader2 size={14} className="animate-spin" />} {deleteHasSent ? "Archive" : "Delete"}
               </button>
@@ -1517,26 +1520,27 @@ export default function AIEmailAgentPage() {
 
       {/* ── Generate Emails Confirm Modal ── */}
       {generateModalId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-purple-500/10 rounded-full flex items-center justify-center">
-                <Sparkles size={18} className="text-purple-400" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <div className="bg-slate-900 border-2 border-transparent bg-clip-padding rounded-2xl w-full max-w-3xl p-8 space-y-6 relative overflow-hidden shadow-[0_0_40px_rgba(139,92,246,0.5)]">
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 p-[2px] -z-10 rounded-2xl" />
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-purple-500/10 rounded-full flex items-center justify-center">
+                <Sparkles size={24} className="text-purple-400" />
               </div>
-              <h3 className="text-lg font-bold text-white">Generate AI Emails</h3>
+              <h3 className="text-2xl font-bold text-white">Generate AI Emails</h3>
             </div>
-            <p className="text-slate-400 text-sm">AI will create email drafts for all leads in this campaign. Leads that already have drafts will be skipped.</p>
-            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-sm text-blue-300 flex items-start gap-2">
-              <Info size={14} className="mt-0.5 shrink-0" /> Nothing will be sent. Drafts require your review and approval first.
+            <p className="text-slate-300 text-lg">AI will create email drafts for all leads in this campaign. Leads that already have drafts will be skipped.</p>
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-base text-blue-300 flex items-start gap-3">
+              <Info size={18} className="mt-1 shrink-0" /> Nothing will be sent. Drafts require your review and approval first.
             </div>
-            <div className="flex justify-end gap-3 pt-2">
-              <button onClick={() => setGenerateModalId(null)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-sm">Cancel</button>
-              <button onClick={() => alert("Generate Full 25-Step Sequence will be available after preview.")} className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm flex items-center gap-2 transition-colors">
-                Generate Full 25-Step Sequence
+            <div className="flex justify-end gap-4 pt-4">
+              <button onClick={() => setGenerateModalId(null)} className="whitespace-nowrap px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-base font-medium transition-colors">Cancel</button>
+              <button onClick={() => alert("Generate Full 5-Step Sequence will be available after preview.")} className="whitespace-nowrap px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-base font-medium transition-colors">
+                Generate Full 5-Step Sequence
               </button>
               <button id="btn-confirm-generate" onClick={() => handleGenerateEmails(generateModalId!)} disabled={generating}
-                className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-medium flex items-center gap-2">
-                {generating && <Loader2 size={14} className="animate-spin" />} Generate Preview Sequence
+                className="whitespace-nowrap px-8 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-xl text-base font-bold flex items-center justify-center gap-2 shadow-lg shadow-purple-500/30 transition-all hover:scale-105">
+                {generating && <Loader2 size={18} className="animate-spin" />} Generate Preview Sequence
               </button>
             </div>
           </div>

@@ -12,6 +12,6 @@ export async function GET() {
     geminiModel: process.env.GEMINI_MODEL || null,
     geminiApiKeyPresent: !!geminiApiKey,
     geminiApiKeyLength: geminiApiKey?.length || 0,
-    openrouterKeyPresent: !!process.env.OPENROUTER_API_KEY,
+    bayOfAssetsKeyPresent: !!process.env.BAYOFASSETS_API_KEY,
   });
 }

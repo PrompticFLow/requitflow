@@ -87,3 +87,22 @@
     border-radius: 0 12px 12px 0 !important;
   }
 }
+
+/* --- Hide Google Translate Elements --- */
+body {
+  top: 0 !important;
+}
+.skiptranslate iframe {
+  display: none !important;
+}
+#goog-gt-tt {
+  display: none !important;
+}
+.goog-te-spinner-pos {
+  display: none !important;
+}
+.goog-text-highlight {
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+/* -------------------------------------- */

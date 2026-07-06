@@ -101,9 +101,9 @@ export function getSevenStepSequenceDelays() {
     { step: 1, delay: 0, unit: 'business_days' },
     { step: 2, delay: 2, unit: 'business_days' },
     { step: 3, delay: 3, unit: 'business_days' },
-    { step: 4, delay: 4, unit: 'business_days' },
-    { step: 5, delay: 5, unit: 'business_days' },
-    { step: 6, delay: 5, unit: 'business_days' },
-    { step: 7, delay: 7, unit: 'business_days' },
+    { step: 4, delay: 3, unit: 'business_days' },
+    { step: 5, delay: 3, unit: 'business_days' },
+    { step: 6, delay: 3, unit: 'business_days' }, // Strict 3 day delay for the first follow-up sequence
+    { step: 7, delay: 3, unit: 'business_days' },
   ];
 }

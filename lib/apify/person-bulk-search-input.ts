@@ -44,11 +44,26 @@ export function buildPersonBulkSearchInput({
 
   const nameSearchKeywords = companySearch || "";
   const jobTitle = jobTitleSearch.trim() || "";
+  // Map generic location string to an ISO country code if possible (caprolok actor requires this)
+  let countryCode = "US"; // Default fallback
+  const locLower = location.toLowerCase();
+  if (locLower.includes("uk") || locLower.includes("kingdom")) countryCode = "GB";
+  else if (locLower.includes("canada")) countryCode = "CA";
+  else if (locLower.includes("australia")) countryCode = "AU";
+  else if (locLower.includes("india")) countryCode = "IN";
+  else if (locLower.includes("germany")) countryCode = "DE";
+  else if (locLower.includes("france")) countryCode = "FR";
 
   return {
-    nameSearchKeywords,
-    jobTitle,
-    geocodeLocation: location,
-    maximumResults: leadCount,
+    // fields for powerai/linkedin-peoples-search-scraper
+    company: nameSearchKeywords || undefined,
+    title: jobTitle || undefined,
+    geocode_location: location,
+    maxResults: leadCount,
+
+    // fields for caprolok/linkedin-leads-generator
+    keyword: jobTitleSearch.trim() || nameSearchKeywords || targetAudience,
+    location: countryCode,
+    max_leads: leadCount
   };
 }

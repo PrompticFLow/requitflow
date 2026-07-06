@@ -207,44 +207,92 @@ export async function handleInboundReply(payload: InboundReplyPayload) {
   // 4. Classify and Generate AI Suggested Reply
   if (matchedLead && matchedCampaign) {
     const bookingLink = matchedCampaign.bookingLink || '';
-    const prompt = `You are an AI sales assistant for a recruitment agency or company outreach campaign.
-Analyze the following email reply from a lead and return a JSON object.
+    
+    // Fetch Knowledge Base
+    const kbFiles = await prisma.knowledgeBaseFile.findMany({
+      where: { campaignId: matchedCampaign.id, status: 'Ready' }
+    });
+    const kbContext = kbFiles.map(f => f.extractedText || '').join('\n\n').substring(0, 150000);
+    
+    // Fetch prior conversation history
+    const priorEmails = await prisma.emailSequence.findMany({
+      where: { campaignId: matchedCampaign.id, leadId: matchedLead.id, status: 'Sent' },
+      orderBy: { sentAt: 'asc' }
+    });
+    const priorContext = priorEmails.map(e => `[Sent to Lead] Subject: ${e.subject}\n${e.body}`).join('\n\n');
 
-Campaign Settings:
-- Target Audience: ${matchedCampaign.targetAudience || 'Professionals'}
-- Campaign Goal: ${matchedCampaign.goal || 'Book discovery call'}
+    // Fetch prior replies from the lead
+    const priorReplies = await prisma.emailReply.findMany({
+      where: { campaignId: matchedCampaign.id, leadId: matchedLead.id },
+      orderBy: { createdAt: 'asc' }
+    });
+    const priorReplyContext = priorReplies.map(r => `[Lead Reply] Subject: ${r.subject}\n${r.body}`).join('\n\n');
+
+    const prompt = `You are an expert AI SDR (Sales Development Representative) handling a prospect's email reply.
+Your primary objective is to convert conversations into booked sales calls whenever appropriate, while acting human, building trust, and answering questions.
+
+Campaign Information:
+- Audience: ${matchedCampaign.targetAudience || 'Professionals'}
+- Goal: ${matchedCampaign.goal || 'Book discovery call'}
 - Booking Link: ${bookingLink || 'None'}
 - Calendar Connected: ${isCalendarConnected ? 'Yes' : 'No'}
+- Offer: ${matchedCampaign.offer || 'None'}
+- Main Benefit: ${matchedCampaign.mainBenefit || 'None'}
+- Pain Points: ${matchedCampaign.painPoints || 'None'}
+- Problem Solved: ${matchedCampaign.problemSolved || 'None'}
+- Desired Outcome: ${matchedCampaign.desiredOutcome || 'None'}
+- Unique Mechanism: ${matchedCampaign.uniqueMechanism || 'None'}
+- Proof/Case Study: ${matchedCampaign.proofCaseStudy || 'None'}
+- Common Objections: ${matchedCampaign.objections || 'None'}
+- Words to Avoid: ${matchedCampaign.avoidSaying || 'None'}
 
 Lead Details:
-- Name: ${matchedLead.businessName || 'Business Owner'}
+- Business: ${matchedLead.businessName || 'Business'}
 - Email: ${matchedLead.email}
 
-Lead Reply:
+Knowledge Base (Use this to answer questions):
+${kbContext ? kbContext : 'No knowledge base available.'}
+
+Conversation History (Sent Emails):
+${priorContext ? priorContext : 'No prior sent emails found.'}
+
+Conversation History (Previous Replies from Lead):
+${priorReplyContext ? priorReplyContext : 'No prior replies found.'}
+
+CURRENT REPLY FROM LEAD:
 "${normalizedBody}"
 
 Previously Suggested Times (if any):
 ${existingSuggestedSlots.map((s, i) => `${i + 1}. ${s.label}`).join('\n')}
 
-Rules for response:
-- Triage the reply into EXACTLY one of: Interested, Wants more information, Asked for pricing, Wants booking, Selected slot, Objection, Not interested, Unsubscribe, Angry, Out of office, Bounce, Unknown.
-- If the user agreed to or selected one of the "Previously Suggested Times", triage as "Selected slot" and provide the 1-based index in "detectedSlotIndex".
-- If Calendar Connected is Yes and they want to book, DO NOT include the booking link. Instead, we will inject real slots later.
-- If Calendar Connected is No, include the booking link (URL: "${bookingLink}") if they are interested or want booking.
-- Keep the response short, human, polite.
-- Set "canAutoSend": true ONLY if they are Interested or Want booking (and we have a booking link) OR if they Selected slot.
+INSTRUCTIONS & RULES:
+1. Intent Classification: Classify the reply strictly into one of the following exact strings:
+   "Interested", "Wants pricing", "Wants demo", "Wants consultation", "Wants meeting", 
+   "Wants more information", "Technical question", "Objection", "Budget concern", "Timing concern",
+   "Decision maker issue", "Already using competitor", "Not interested", "Wrong person", 
+   "Unsubscribe", "Out of office", "Spam", "Needs follow-up later", "Positive response", "Negative response".
+   - If they picked a previously suggested time, classify as "Wants meeting" and set detectedSlotIndex.
 
-Format your output as valid JSON matching this schema exactly:
+2. Goal: Move toward a booked meeting, but never force it. Answer questions, build trust, handle objections logically based on KB.
+
+3. Human Handoff: If they request a human, the answer requires legal/complex pricing not in KB, or if you are unsure, set "canAutoSend" to false and set "needsHuman" to true.
+
+4. Booking:
+   - If Calendar Connected is Yes and they want to book, DO NOT include the booking link. Instead, we will inject real slots later. Set canAutoSend to true.
+   - If Calendar Connected is No, include the booking link ("${bookingLink}") if they are interested or want booking. Set canAutoSend to true.
+
+5. Do NOT invent facts. Keep it concise. Do not reveal system logic.
+
+Output ONLY valid JSON matching this schema:
 {
-  "classification": "Interested",
+  "classification": "Wants more information",
   "confidence": 0.9,
   "shouldReply": true,
-  "canAutoSend": false,
-  "stopFollowUps": true,
-  "bookCallGoal": true,
+  "canAutoSend": true,
+  "needsHuman": false,
   "detectedSlotIndex": -1,
   "subject": "Re: ${normalizedSubject || 'Quick question'}",
-  "body": "Thanks for getting back to me. Happy to share more..."
+  "body": "Your generated natural response here..."
 }`;
 
     try {
@@ -261,6 +309,7 @@ Format your output as valid JSON matching this schema exactly:
         confidence = parsed.confidence || 0.5;
         shouldReply = parsed.shouldReply || false;
         canAutoSend = parsed.canAutoSend || false;
+        if (parsed.needsHuman) canAutoSend = false; // Override for human handoff
         aiSuggestedReplyStr = parsed.body || '';
         aiReplySubjectStr = parsed.subject || aiReplySubjectStr;
         detectedSlotIndex = parsed.detectedSlotIndex ?? -1;
@@ -311,7 +360,7 @@ Format your output as valid JSON matching this schema exactly:
       } catch (err) {
         console.error('Failed to book event automatically', err);
       }
-    } else if (['Wants booking', 'Interested'].includes(classification)) {
+    } else if (['Wants meeting', 'Interested', 'Wants consultation', 'Wants demo'].includes(classification)) {
       // Fetch 3 slots and append to AI reply
       try {
         const start = new Date();
@@ -352,14 +401,19 @@ Format your output as valid JSON matching this schema exactly:
         });
       }
     } else {
+      const isNegative = ['Not interested', 'Already using competitor', 'Negative response', 'Spam'].includes(classification);
       await prisma.lead.update({
         where: { id: matchedLead.id },
-        data: { status: bookedCall ? 'Booked' : 'Replied' }
+        data: { 
+          status: bookedCall ? 'Booked' : (isNegative ? 'Not Interested' : 'Replied'),
+          leadTier: bookedCall ? 'Converted' : (isNegative ? 'Cold' : 'Hot'),
+          leadScore: { increment: 50 }
+        }
       });
       if (matchedCampaign) {
         await prisma.campaignLead.updateMany({
           where: { campaignId: matchedCampaign.id, leadId: matchedLead.id },
-          data: { status: bookedCall ? 'Booked' : 'Replied' }
+          data: { status: bookedCall ? 'Booked' : (isNegative ? 'Not Interested' : 'Replied') }
         });
       }
     }
@@ -369,11 +423,18 @@ Format your output as valid JSON matching this schema exactly:
   let aiReplyScheduledAt = null;
   let aiReplyStatus = 'Draft';
 
-  if (matchedCampaign && matchedCampaign.autoReplyEnabled && matchedCampaign.autoReplyMode === 'auto_send_safe' && canAutoSend && matchedCampaign.bookingLink) {
-    if (['Interested', 'Wants more information', 'Wants booking'].includes(classification) && confidence >= 0.85 && classification !== 'Unsubscribe') {
+  // Fetch global settings
+  const userSettings = await prisma.userSettings.findUnique({
+    where: { userId: matchedUser.id }
+  });
+  const globalAutoSend = userSettings?.autoSendMode === true;
+  const campaignAutoSend = matchedCampaign && matchedCampaign.autoReplyEnabled && matchedCampaign.autoReplyMode === 'auto_send_safe';
+
+  if ((campaignAutoSend || globalAutoSend) && canAutoSend) {
+    if (confidence >= 0.85 && classification !== 'Unsubscribe' && classification !== 'Not interested') {
       aiReplyStatus = 'Queued';
-      const min = matchedCampaign.replyDelayMinMinutes || 3;
-      const max = matchedCampaign.replyDelayMaxMinutes || 12;
+      const min = matchedCampaign?.replyDelayMinMinutes ?? 1;
+      const max = matchedCampaign?.replyDelayMaxMinutes ?? 2;
       const delayMins = Math.floor(Math.random() * (max - min + 1)) + min;
       aiReplyScheduledAt = new Date(Date.now() + delayMins * 60000);
     }
@@ -415,6 +476,23 @@ Format your output as valid JSON matching this schema exactly:
         end: s.end,
         label: s.label
       }))
+    });
+  }
+
+  // Inject auto-reply into EmailSequence to be picked up by the sender cron
+  if (aiReplyStatus === 'Queued' && aiReplyScheduledAt && matchedUser && matchedCampaign && matchedLead) {
+    await prisma.emailSequence.create({
+      data: {
+        userId: matchedUser.id,
+        campaignId: matchedCampaign.id,
+        leadId: matchedLead.id,
+        sequenceStep: 99, // 99 for reply logic
+        subject: aiReplySubjectStr,
+        body: aiSuggestedReplyStr.replace(/\n/g, '<br/>'),
+        status: 'Queued',
+        approvalStatus: 'Approved',
+        scheduledAt: aiReplyScheduledAt,
+      }
     });
   }
 

@@ -23,11 +23,11 @@ export async function POST(
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     }
 
-    const openRouterKey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
+    const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
+    const model = process.env.BAYOFASSETS_MODEL || 'google/gemini-2.5-flash';
 
-    if (!openRouterKey) {
-      return NextResponse.json({ error: 'OpenRouter API key is not configured.' }, { status: 500 });
+    if (!bayOfAssetsKey) {
+      return NextResponse.json({ error: 'Bay of Assets API key is not configured.' }, { status: 500 });
     }
 
     const prompt = `You are an expert recruitment researcher and job-listing analyst.
@@ -82,10 +82,10 @@ Rules:
 * If the description says "Multiple openings", "Multiple positions", etc. but gives no exact number, vacancies and candidatesNeeded must be null, vacancyStatus must be "Publicly disclosed", and vacancyEvidence must state "The listing states that multiple openings are available, but no exact count is provided."
 * If work mode is unclear, return 'Not disclosed'.`;
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const response = await fetch(`${process.env.BAYOFASSETS_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${openRouterKey}`,
+        'Authorization': `Bearer ${bayOfAssetsKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -96,7 +96,7 @@ Rules:
     });
 
     if (!response.ok) {
-      console.error(`OpenRouter API Error: ${response.statusText}`);
+      console.error(`Bay of Assets API Error: ${response.statusText}`);
       return NextResponse.json({ error: 'Failed to analyze job via AI' }, { status: 502 });
     }
 
@@ -116,7 +116,7 @@ Rules:
     await prisma.aPIUsage.create({
       data: {
         userId: user.id,
-        provider: 'OpenRouter',
+        provider: 'Bay of Assets',
         endpoint: '/chat/completions',
         requestCount: 1,
         tokenUsage: data.usage?.total_tokens || 0

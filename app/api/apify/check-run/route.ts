@@ -73,8 +73,8 @@ export async function POST(req: Request) {
 
     // Save leads to database and generate AI insights concurrently
     const createdLeads = [];
-    const openrouterKey = process.env.OPENROUTER_API_KEY;
-    const openrouterModel = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
+    const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
+    const bayOfAssetsModel = process.env.BAYOFASSETS_MODEL || 'google/gemini-2.5-flash';
 
     const processLead = async (item: any) => {
       // Basic scoring logic
@@ -101,20 +101,20 @@ export async function POST(req: Request) {
 
       // Generate AI Insight
       let aiInsight = "Potential recruitment client based on public business presence and available contact details.";
-      if (openrouterKey) {
+      if (bayOfAssetsKey) {
         try {
           const prompt = `Based on this company name (${item.title}), category (${item.categoryName || 'Unknown'}), and rating (${item.rating || 'N/A'}), write exactly one brief sentence on why a recruitment agency should contact them to offer hiring/staffing services. Do not include quotes, just the sentence.`;
           
-          const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          const orRes = await fetch("${process.env.BAYOFASSETS_BASE_URL}/chat/completions", {
             method: "POST",
             headers: {
-              "Authorization": `Bearer ${openrouterKey}`,
+              "Authorization": `Bearer ${bayOfAssetsKey}`,
               "Content-Type": "application/json",
               "HTTP-Referer": "https://funnelzen.ai",
               "X-Title": "FunnelZen AI"
             },
             body: JSON.stringify({
-              model: openrouterModel,
+              model: bayOfAssetsModel,
               messages: [{ role: "user", content: prompt }]
             })
           });

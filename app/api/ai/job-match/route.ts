@@ -28,11 +28,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Candidate or Job not found.' }, { status: 404 });
     }
 
-    const openRouterKey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
+    const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
+    const model = process.env.BAYOFASSETS_MODEL || 'google/gemini-2.5-flash';
 
-    if (!openRouterKey) {
-      return NextResponse.json({ error: 'OpenRouter API key is not configured.' }, { status: 500 });
+    if (!bayOfAssetsKey) {
+      return NextResponse.json({ error: 'Bay of Assets API key is not configured.' }, { status: 500 });
     }
 
     const prompt = `You are an expert AI recruiter matching a candidate to a job opening.
@@ -63,10 +63,10 @@ Return only valid JSON without markdown wrapping:
 "coverLetter": "A tailored, professional cover letter highlighting why the candidate is a great fit for this specific role."
 }`;
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const response = await fetch(`${process.env.BAYOFASSETS_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${openRouterKey}`,
+        'Authorization': `Bearer ${bayOfAssetsKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -77,7 +77,7 @@ Return only valid JSON without markdown wrapping:
     });
 
     if (!response.ok) {
-      console.error(`OpenRouter API Error: ${response.statusText}`);
+      console.error(`Bay of Assets API Error: ${response.statusText}`);
       return NextResponse.json({ error: 'Failed to analyze match via AI' }, { status: 502 });
     }
 
@@ -95,7 +95,7 @@ Return only valid JSON without markdown wrapping:
     await prisma.aPIUsage.create({
       data: {
         userId: user.id,
-        provider: 'OpenRouter',
+        provider: 'Bay of Assets',
         endpoint: '/job-match',
         requestCount: 1,
         tokenUsage: data.usage?.total_tokens || 0

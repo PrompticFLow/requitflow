@@ -10,7 +10,7 @@ export default function SMSOutreachPage() {
       <div className="flex justify-between items-end">
         <div>
           <h2 className="text-3xl font-bold text-white mb-2">SMS Outreach</h2>
-          <p className="text-slate-400">Manage and approve Twilio-powered AI SMS sequences for clients and candidates.</p>
+          <p className="text-slate-400">Manage and approve Twilio-powered AI SMS sequences for prospects and leads.</p>
         </div>
       </div>
 
@@ -30,7 +30,7 @@ export default function SMSOutreachPage() {
           <table className="w-full text-left text-sm text-slate-300">
             <thead className="bg-slate-900/50 text-slate-400 border-b border-slate-800">
               <tr>
-                <th className="px-6 py-4 font-medium">Client/Candidate & Phone</th>
+                <th className="px-6 py-4 font-medium">Lead & Phone</th>
                 <th className="px-6 py-4 font-medium">Sequence Step</th>
                 <th className="px-6 py-4 font-medium w-1/3">Message Preview</th>
                 <th className="px-6 py-4 font-medium">Status</th>

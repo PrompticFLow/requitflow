@@ -49,7 +49,7 @@ export default function AnalyticsPage() {
       <div className="space-y-6">
         <div>
           <h2 className="text-3xl font-bold text-white mb-2">Campaign Analytics</h2>
-          <p className="text-slate-400">Deep dive into your AI outreach performance and client/candidate sourcing metrics.</p>
+          <p className="text-slate-400">Deep dive into your AI outreach performance and client sourcing metrics.</p>
         </div>
         <div className="glass p-12 rounded-2xl border border-slate-700/50 flex flex-col items-center justify-center text-center min-h-[50vh]">
           <div className="w-20 h-20 bg-blue-500/10 rounded-full flex items-center justify-center mb-6">
@@ -72,7 +72,6 @@ export default function AnalyticsPage() {
 
   const metrics = [
     { name: "Client Leads Found", value: data?.clientLeadsFound || 0 },
-    { name: "Candidates Found", value: data?.candidatesFound || 0 },
     { name: "Active Campaigns", value: data?.activeCampaigns || 0 },
     { name: "Emails Sent", value: data?.emailsSent || 0 },
     { name: "SMS Sent", value: data?.smsSent || 0 },
@@ -88,7 +87,7 @@ export default function AnalyticsPage() {
       <div className="flex justify-between items-end">
         <div>
           <h2 className="text-3xl font-bold text-white mb-2">Campaign Analytics</h2>
-          <p className="text-slate-400">Deep dive into your AI outreach performance and client/candidate sourcing metrics.</p>
+          <p className="text-slate-400">Deep dive into your AI outreach performance and client sourcing metrics.</p>
         </div>
       </div>
 
@@ -110,7 +109,7 @@ export default function AnalyticsPage() {
         <div className="glass p-6 rounded-2xl border border-slate-700/50 lg:col-span-2 flex flex-col">
           <div className="flex items-center space-x-2 mb-6">
             <TrendingUp className="text-blue-400" size={20} />
-            <h3 className="text-xl font-semibold text-white">Candidate & Client Sourcing Trend (Last 7 Days)</h3>
+            <h3 className="text-xl font-semibold text-white">Client Sourcing Trend (Last 7 Days)</h3>
           </div>
           {loading ? (
              <div className="flex-1 flex items-center justify-center min-h-[300px]">

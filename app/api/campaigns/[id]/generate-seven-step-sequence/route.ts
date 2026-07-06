@@ -16,16 +16,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const campaign = await prisma.campaign.findUnique({
       where: { id },
-      include: { user: { include: { settings: true } } }
+      include: { 
+        user: { include: { settings: true } },
+        knowledgeBaseFiles: true 
+      }
     });
 
     if (!campaign) {
       return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
     }
 
-    const openrouterKey = process.env.OPENROUTER_API_KEY || campaign.user.settings?.openrouterKeyEncrypted;
-    if (!openrouterKey) {
-      return NextResponse.json({ error: 'OpenRouter API key missing' }, { status: 400 });
+    const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY || campaign.user.settings?.bayOfAssetsKeyEncrypted;
+    if (!bayOfAssetsKey) {
+      return NextResponse.json({ error: 'Bay of Assets API key missing' }, { status: 400 });
     }
 
     // Process in batches of 10
@@ -51,11 +54,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             continue;
           }
 
-          // Fetch KB files if needed (mocked for now)
-          const kbFiles: any[] = []; 
+          // Use actual KB files instead of mocking
+          const kbFiles = campaign.knowledgeBaseFiles || []; 
 
           const sequence = await generateSevenStepSequence(
-            openrouterKey,
+            bayOfAssetsKey,
             'openai/gpt-4o-mini',
             campaign,
             lead,

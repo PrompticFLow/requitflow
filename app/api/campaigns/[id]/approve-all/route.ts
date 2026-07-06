@@ -16,6 +16,46 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
     }
 
+    const isActive = campaign.status === 'Active';
+
+    // Find all pending sequences first to know what to update
+    const pendingSequences = await prisma.emailSequence.findMany({
+      where: { campaignId, approvalStatus: "Pending" }
+    });
+
+    if (pendingSequences.length > 0) {
+      if (isActive) {
+        // If active, we need to update them to Queued and set scheduledAt (at least for step 1)
+        // We'll just do it in a transaction
+        await prisma.$transaction(
+          pendingSequences.map(seq => {
+            let scheduledAt = seq.scheduledAt;
+            if (seq.sequenceStep === 1) scheduledAt = new Date();
+            
+            return prisma.emailSequence.update({
+              where: { id: seq.id },
+              data: {
+                approvalStatus: "Approved",
+                status: "Queued",
+                scheduledAt: scheduledAt || new Date()
+              }
+            });
+          })
+        );
+        
+        // Trigger background send
+        const { processDueEmails } = await import('@/lib/email-dispatch');
+        processDueEmails({ userId: user.id }).catch(e => console.error("Auto-send failed", e));
+      } else {
+        await prisma.emailSequence.updateMany({
+          where: { campaignId, approvalStatus: "Pending" },
+          data: {
+            approvalStatus: "Approved"
+          }
+        });
+      }
+    }
+
     let whereClause: any = { campaignId, userId: user.id };
     
     if (leadId) {

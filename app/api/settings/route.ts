@@ -18,7 +18,7 @@ export async function GET() {
     settings: {
       ...settings,
       apifyTokenEncrypted: settings.apifyTokenEncrypted ? '********' : null,
-      openrouterKeyEncrypted: settings.openrouterKeyEncrypted ? '********' : null,
+      bayOfAssetsKeyEncrypted: settings.bayOfAssetsKeyEncrypted ? '********' : null,
       twilioSidEncrypted: settings.twilioSidEncrypted ? '********' : null,
       twilioAuthTokenEncrypted: settings.twilioAuthTokenEncrypted ? '********' : null,
       smtpPassEncrypted: settings.smtpPassEncrypted ? '********' : null,
@@ -41,10 +41,10 @@ export async function POST(req: Request) {
     delete updateData.apifyTokenEncrypted;
   }
 
-  if (data.openrouterKeyEncrypted && data.openrouterKeyEncrypted !== '********') {
-    updateData.openrouterKeyEncrypted = encrypt(data.openrouterKeyEncrypted);
+  if (data.bayOfAssetsKeyEncrypted && data.bayOfAssetsKeyEncrypted !== '********') {
+    updateData.bayOfAssetsKeyEncrypted = encrypt(data.bayOfAssetsKeyEncrypted);
   } else {
-    delete updateData.openrouterKeyEncrypted;
+    delete updateData.bayOfAssetsKeyEncrypted;
   }
   
   // Similar for others

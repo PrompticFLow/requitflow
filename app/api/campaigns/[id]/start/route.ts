@@ -58,17 +58,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       missing.push('No leads selected');
     }
     
-    // Check if 5 emails are generated
+    // (Removed hardcoded 5 emails check; we only strictly require Email 1 to be approved)
     const leads = campaign.campaignLeads.map((cl: any) => cl.leadId);
     const sequences = campaign.emailSequences || [];
-    
-    for (const leadId of leads) {
-      const leadSequences = sequences.filter((s: any) => s.leadId === leadId);
-      if (leadSequences.length < 5) {
-        missing.push(`5 email drafts not generated for lead ${leadId}`);
-        break;
-      }
-    }
 
     // Check if Email 1 is approved for all leads in the campaign
     const approvedEmail1s = sequences.filter((s: any) => s.sequenceStep === 1 && s.approvalStatus === 'Approved');

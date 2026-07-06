@@ -50,6 +50,27 @@ export default function CampaignsPage() {
     }
   };
 
+  const deleteAllCampaigns = async () => {
+    if (!confirm("Are you absolutely sure you want to delete ALL campaigns? This action cannot be undone.")) return;
+    
+    // Double confirmation for safety
+    if (!confirm("Confirm again: DELETE ALL CAMPAIGNS?")) return;
+
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/campaigns/delete-all`, { method: "DELETE" });
+      if (res.ok) {
+        setCampaigns([]);
+      } else {
+        alert("Failed to delete all campaigns.");
+      }
+    } catch (err) {
+      alert("Error calling API");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fetchCampaigns = async () => {
     try {
       const res = await fetch("/api/campaigns");
@@ -86,17 +107,27 @@ export default function CampaignsPage() {
           <h2 className="text-3xl font-bold text-white mb-2">Campaigns</h2>
           <p className="text-slate-400">Manage your automated outreach campaigns for prospects and leads.</p>
         </div>
-        <button 
-          onClick={() => {
-            setEditingCampaignId(null);
-            setInitialModalData(null);
-            setShowModal(true);
-          }}
-          className="flex items-center space-x-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-all shadow-lg shadow-blue-500/25"
-        >
-          <Plus size={18} />
-          <span>Create Campaign</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <button 
+            onClick={deleteAllCampaigns}
+            className="flex items-center space-x-2 px-4 py-2.5 bg-red-900/40 hover:bg-red-600/60 text-red-200 border border-red-500/30 hover:border-red-500/50 rounded-lg font-medium transition-all"
+            title="Delete all campaigns"
+          >
+            <Trash2 size={18} />
+            <span>Delete All</span>
+          </button>
+          <button 
+            onClick={() => {
+              setEditingCampaignId(null);
+              setInitialModalData(null);
+              setShowModal(true);
+            }}
+            className="flex items-center space-x-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-all shadow-lg shadow-blue-500/25"
+          >
+            <Plus size={18} />
+            <span>Create Campaign</span>
+          </button>
+        </div>
       </div>
 
       {loading ? (

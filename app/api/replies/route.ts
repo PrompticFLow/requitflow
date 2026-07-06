@@ -7,8 +7,16 @@ export async function GET(req: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
+    const url = new URL(req.url);
+    const campaignId = url.searchParams.get('campaignId');
+
+    const whereClause: any = { userId: user.id };
+    if (campaignId) {
+      whereClause.campaignId = campaignId;
+    }
+
     const replies = await prisma.emailReply.findMany({
-      where: { lead: { userId: user.id } },
+      where: whereClause,
       include: {
         lead: true,
         campaign: true
@@ -22,7 +30,17 @@ export async function GET(req: Request) {
       aiCategory: r.classification || 'Unknown'
     }));
 
-    return NextResponse.json({ replies: mappedReplies });
+    const aiModeCampaign = await prisma.campaign.findFirst({
+      where: { userId: user.id, autoReplyEnabled: true, autoReplyMode: 'auto_send_safe' }
+    });
+
+    const userSettings = await prisma.userSettings.findUnique({
+      where: { userId: user.id }
+    });
+
+    const hasAiModeEnabled = !!aiModeCampaign || userSettings?.autoSendMode === true;
+
+    return NextResponse.json({ replies: mappedReplies, hasAiModeEnabled });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Internal error' }, { status: 500 });
   }

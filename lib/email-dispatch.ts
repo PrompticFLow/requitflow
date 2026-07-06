@@ -11,6 +11,7 @@ export interface SendCampaignEmailOptions {
   campaignId: string;
   leadId: string;
   emailSequenceId: string;
+  sendLogId?: string;
 }
 
 export async function sendCampaignEmail({
@@ -20,7 +21,8 @@ export async function sendCampaignEmail({
   text,
   campaignId,
   leadId,
-  emailSequenceId
+  emailSequenceId,
+  sendLogId
 }: SendCampaignEmailOptions) {
   
   // Fetch all entities to perform safety checks
@@ -87,6 +89,25 @@ export async function sendCampaignEmail({
     return { success: false, error: "Email body cannot be empty." };
   }
 
+  let finalHtml = html;
+  if (sendLogId) {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    
+    // 1. Inject open tracking pixel
+    const pixelUrl = `${appUrl}/api/tracking/open/${sendLogId}`;
+    finalHtml += `<img src="${pixelUrl}" width="1" height="1" style="display:none;" alt="" />`;
+    
+    // 2. Rewrite links for click tracking
+    finalHtml = finalHtml.replace(/<a([^>]+)href=["']([^"']+)["']([^>]*)>/gi, (match, before, url, after) => {
+      // Skip non-web links
+      if (url.startsWith('mailto:') || url.startsWith('tel:') || url.startsWith('#')) {
+        return match;
+      }
+      const trackingUrl = `${appUrl}/api/tracking/click?url=${encodeURIComponent(url)}&sendLogId=${sendLogId}`;
+      return `<a${before}href="${trackingUrl}"${after}>`;
+    });
+  }
+
   // Lead checks
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!to || !emailRegex.test(to)) {
@@ -142,7 +163,7 @@ export async function sendCampaignEmail({
         to,
         subject,
         text: text || html.replace(/<[^>]+>/g, ''),
-        html
+        html: finalHtml
       };
 
       const info = await transporter.sendMail(mailOptions);
@@ -167,7 +188,7 @@ export async function sendCampaignEmail({
         email: sendgridFromEmail
       },
       subject,
-      html,
+      html: finalHtml,
       text: text || html.replace(/<[^>]+>/g, ''),
     };
 
@@ -253,8 +274,9 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
         continue;
       }
 
-      // 2. Check if Lead Replied or Booked
-      if (lead.status === 'Booked' || lead.status === 'Not Interested' || lead.status === 'Replied' || lead.status === 'Bounced') {
+      // 2. Check if Lead Replied, Booked, or met any other stop condition
+      const stopStatuses = ['Booked', 'Not Interested', 'Replied', 'Bounced', 'Opportunity Won', 'Opportunity Lost', 'Spam complaint'];
+      if (stopStatuses.includes(lead.status)) {
         await prisma.emailSequence.update({
           where: { id: email.id },
           data: { status: 'Cancelled', errorMessage: `Lead status is ${lead.status}` }
@@ -302,7 +324,18 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
         continue;
       }
 
-      // 4. Send Email using our existing sendCampaignEmail function
+      // 4. Create SendLog immediately so we have the ID for the pixel tracking
+      const sendLog = await prisma.emailSendLog.create({
+        data: {
+          campaignId: campaign.id,
+          leadId: lead.id,
+          emailSequenceId: email.id,
+          subject: email.subject,
+          body: email.body,
+          status: 'Sending'
+        }
+      });
+
       processedCount++;
       const result = await sendCampaignEmail({
         to: lead.email || '',
@@ -310,7 +343,8 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
         html: email.body, // plain text or HTML body
         campaignId: campaign.id,
         leadId: lead.id,
-        emailSequenceId: email.id
+        emailSequenceId: email.id,
+        sendLogId: sendLog.id
       });
 
       if (result.success) {
@@ -325,14 +359,11 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
         });
 
         // Log sent
-        await prisma.emailSendLog.create({
+        await prisma.emailSendLog.update({
+          where: { id: sendLog.id },
           data: {
-            campaignId: campaign.id,
-            leadId: lead.id,
-            emailSequenceId: email.id,
-            subject: email.subject,
-            body: email.body,
-            status: 'Sent'
+            status: 'Sent',
+            sentAt: new Date()
           }
         });
 
@@ -349,14 +380,11 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
         });
 
         // Log failed send
-        await prisma.emailSendLog.create({
+        await prisma.emailSendLog.update({
+          where: { id: sendLog.id },
           data: {
-            campaignId: campaign.id,
-            leadId: lead.id,
-            emailSequenceId: email.id,
-            subject: email.subject,
-            body: email.body,
-            status: 'Failed'
+            status: 'Failed',
+            errorMessage: result.error || 'Send failed'
           }
         });
 

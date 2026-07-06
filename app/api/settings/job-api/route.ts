@@ -9,14 +9,14 @@ export async function GET(req: Request) {
     }
 
     const hasJobBoard = !!process.env.JOB_BOARD_API_KEY;
-    const hasOpenRouter = !!process.env.OPENROUTER_API_KEY;
+    const hasBayOfAssets = !!process.env.BAYOFASSETS_API_KEY;
     const hasNvidia = !!process.env.NVIDIA_API_KEY;
-    const activeProvider = process.env.AI_PROVIDER === 'nvidia' ? 'NVIDIA' : 'OpenRouter';
+    const activeProvider = process.env.AI_PROVIDER === 'nvidia' ? 'NVIDIA' : 'Bay of Assets';
 
     return NextResponse.json({
       settings: {
         jobBoardConfigured: hasJobBoard,
-        openRouterConfigured: hasOpenRouter,
+        bayOfAssetsConfigured: hasBayOfAssets,
         nvidiaConfigured: hasNvidia,
         activeProvider,
         defaultCountry: 'US',

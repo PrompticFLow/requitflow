@@ -10,8 +10,15 @@ export const maxDuration = 300;
 export async function GET(req: Request) {
   try {
     const authHeader = req.headers.get('authorization');
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const hasCronSecret = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+
+    // If no cron secret, check if the request is from an authenticated user (for manual sync)
+    if (!hasCronSecret) {
+      const { getCurrentUser } = await import('@/lib/auth');
+      const user = await getCurrentUser();
+      if (!user) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
     }
 
     const now = new Date();
@@ -119,6 +126,15 @@ export async function GET(req: Request) {
               const body = parsed.text || parsed.textAsHtml || '';
 
               if (!fromEmail || !body) continue;
+
+              // Skip bounces, mailer-daemon, postmaster, auto-replies, delivery failures
+              const junkSenders = ['mailer-daemon', 'postmaster', 'noreply', 'no-reply', 'mailchannels', 'notifications@'];
+              const junkSubjects = ['undelivered mail', 'delivery failure', 'delivery status', 'automatic reply', 'out of office', 'auto-reply', 'smtp connection successful', 'mail delivery failed', 'returned to sender'];
+              const fromLower = fromEmail.toLowerCase();
+              const subjectLower = subject.toLowerCase();
+              const isJunk = junkSenders.some(j => fromLower.includes(j)) || junkSubjects.some(j => subjectLower.includes(j));
+              if (isJunk) continue;
+
 
               const normalizedFrom = fromEmail.trim().toLowerCase();
               const normalizedSubject = subject.trim();

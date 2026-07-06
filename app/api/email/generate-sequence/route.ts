@@ -2,16 +2,16 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { decrypt } from '@/lib/encryption';
-import { generateText } from '@/services/openrouter';
+import { generateText } from '@/services/bayofassets';
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const settings = await prisma.userSettings.findUnique({ where: { userId: user.id } });
-  const openrouterKey = process.env.OPENROUTER_API_KEY;
-  if (!openrouterKey) {
-    return NextResponse.json({ error: 'OpenRouter key missing in environment variables' }, { status: 400 });
+  const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
+  if (!bayOfAssetsKey) {
+    return NextResponse.json({ error: 'Bay of Assets key missing in environment variables' }, { status: 400 });
   }
   
   const { campaignId, leadId } = await req.json();
@@ -34,7 +34,7 @@ Booking link: ${settings?.bookingLink || ''}
 Keep it short, human, and professional. Output exactly 3 steps in JSON array format: [{ "subject": "...", "body": "..." }]`;
 
   try {
-    const rawResponse = await generateText(openrouterKey, prompt, settings?.openrouterModel || 'openai/gpt-4o-mini');
+    const rawResponse = await generateText(bayOfAssetsKey, prompt, settings?.bayOfAssetsModel || 'openai/gpt-4o-mini');
     
     // Naive JSON parsing of AI output
     const jsonMatch = rawResponse.match(/\[[\s\S]*\]/);

@@ -6,10 +6,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const openrouterKey = process.env.OPENROUTER_API_KEY;
-  const openrouterModel = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
+  const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
+  const bayOfAssetsModel = process.env.BAYOFASSETS_MODEL || 'google/gemini-2.5-flash';
 
-  if (!openrouterKey) {
+  if (!bayOfAssetsKey) {
     return NextResponse.json({
       error: 'AI service is not configured. Please add your OpenRouter API key in Settings.'
     }, { status: 400 });
@@ -64,18 +64,18 @@ Rules:
 - No invented proof or fake results
 
 Return ONLY valid JSON (no markdown):
-{ "subject": "...", "preview_text": "...", "body": "...", "cta_text": "...", "personalization_reason": "..." }`;
+{ "subject": "...", "preview_text": "...", "body": "...", "cta_text": "...", "personalization_reason": "...", "personalization_score": 85 }`;
 
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const res = await fetch(`${process.env.BAYOFASSETS_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${openrouterKey}`,
+        'Authorization': `Bearer ${bayOfAssetsKey}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': 'https://funnelzenai.com',
         'X-Title': 'FunnelZen AI'
       },
       body: JSON.stringify({
-        model: openrouterModel,
+        model: bayOfAssetsModel,
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -105,7 +105,8 @@ Return ONLY valid JSON (no markdown):
     const spamRisk = spamHits >= 3 ? 'High' : spamHits >= 1 ? 'Medium' : 'Low';
 
     // Recalculate personalization score
-    const personalizationScore = lead.aiInsight ? 75 : lead.category ? 60 : 40;
+    let aiScore = parseInt(regenData.personalization_score);
+    const personalizationScore = !isNaN(aiScore) ? aiScore : (lead.aiInsight ? 75 : lead.category ? 60 : 40);
 
     const updated = await prisma.emailSequence.update({
       where: { id },

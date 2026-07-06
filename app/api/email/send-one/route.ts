@@ -34,16 +34,29 @@ export async function POST(req: Request) {
   const finalBody = sequence.editedBody || sequence.aiOriginalBody || sequence.body;
 
   try {
+    const sendLog = await prisma.emailSendLog.create({
+      data: {
+        campaignId: sequence.campaignId,
+        leadId: sequence.leadId,
+        emailSequenceId: sequence.id,
+        subject: finalSubject,
+        body: finalBody,
+        status: 'Sending'
+      }
+    });
+
     const sendResult = await sendCampaignEmail({
       to: sequence.lead.email,
       subject: finalSubject,
       html: finalBody.replace(/\n/g, '<br/>'),
       campaignId: sequence.campaignId,
       leadId: sequence.leadId,
-      emailSequenceId: sequence.id
+      emailSequenceId: sequence.id,
+      sendLogId: sendLog.id
     });
 
     if (!sendResult.success) {
+      await prisma.emailSendLog.update({ where: { id: sendLog.id }, data: { status: 'Failed', errorMessage: sendResult.error } });
       throw new Error(sendResult.error);
     }
 
@@ -52,16 +65,9 @@ export async function POST(req: Request) {
       data: { status: 'Sent', sentAt: new Date() }
     });
     
-    await prisma.emailSendLog.create({
-      data: {
-        campaignId: sequence.campaignId,
-        leadId: sequence.leadId,
-        emailSequenceId: sequence.id,
-        subject: finalSubject,
-        body: finalBody,
-        status: 'Sent',
-        sentAt: new Date()
-      }
+    await prisma.emailSendLog.update({
+      where: { id: sendLog.id },
+      data: { status: 'Sent', sentAt: new Date() }
     });
 
     return NextResponse.json({ sequence: updated });

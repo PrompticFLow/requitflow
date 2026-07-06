@@ -1,10 +1,17 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Search, Filter, Loader2, MessageSquare, Reply as ReplyIcon, CheckCircle2, XCircle, AlertCircle, Calendar } from "lucide-react";
+import { Search, Filter, Loader2, MessageSquare, Reply as ReplyIcon, CheckCircle2, XCircle, AlertCircle, Calendar, RefreshCw } from "lucide-react";
 
 export default function RepliesPage() {
   const [loading, setLoading] = useState(true);
   const [replies, setReplies] = useState<any[]>([]);
+  const [hasAiMode, setHasAiMode] = useState(false);
+
+  // Manual reply state
+  const [editingReplyId, setEditingReplyId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
+  const [replySubject, setReplySubject] = useState("");
+  const [sendingReply, setSendingReply] = useState(false);
 
   const fetchReplies = async () => {
     setLoading(true);
@@ -12,6 +19,7 @@ export default function RepliesPage() {
       const res = await fetch("/api/replies");
       const data = await res.json();
       if (data.replies) setReplies(data.replies);
+      setHasAiMode(data.hasAiModeEnabled || false);
     } catch(e) { console.error(e) }
     setLoading(false);
   };
@@ -59,6 +67,29 @@ export default function RepliesPage() {
     }
   };
 
+  const handleSendReply = async (id: string) => {
+    if (!replyText.trim()) return alert("Reply body cannot be empty.");
+    setSendingReply(true);
+    try {
+      const res = await fetch(`/api/replies/${id}/send-reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: replyText, subject: replySubject })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert("Reply sent successfully!");
+        setEditingReplyId(null);
+        await fetchReplies();
+      } else {
+        alert(data.error || "Failed to send reply.");
+      }
+    } catch (e) {
+      alert("An error occurred while sending.");
+    }
+    setSendingReply(false);
+  };
+
   const getCategoryBadge = (category: string) => {
     switch(category) {
       case 'Interested':
@@ -85,32 +116,78 @@ export default function RepliesPage() {
           <h2 className="text-3xl font-bold text-white mb-2">Replies Inbox</h2>
           <p className="text-slate-400">Review incoming replies triaged by AI.</p>
         </div>
-        <button 
-          onClick={async () => {
-            const res = await fetch('/api/leads');
-            const data = await res.json();
-            const lead = data.leads?.[0];
-            if (!lead) return alert('No leads available to simulate reply.');
-            const sim = await fetch('/api/debug/simulate-reply', {
-              method: 'POST', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ leadId: lead.id, body: "Yes, I’m interested. Can we talk this week?" })
-            });
-            if (sim.ok) { alert('Reply simulated successfully!'); fetchReplies(); }
-            else { const e = await sim.json(); alert(e.error || 'Failed to simulate'); }
-          }}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors"
-        >
-          Simulate Demo Reply
-        </button>
-      </div>
-
-      <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex items-start space-x-3 text-blue-400">
-        <MessageSquare size={20} className="shrink-0 mt-0.5" />
-        <div className="text-sm">
-          <p className="font-semibold mb-1">Human Handle Mode is Enabled</p>
-          <p>AI automatically reads replies and categorizes them below, but it will not auto-send responses. You must manually review and action each reply.</p>
+        <div className="flex space-x-2">
+          <button
+            onClick={async () => {
+              setLoading(true);
+              try {
+                const res = await fetch("/api/email/process-replies");
+                const data = await res.json();
+                if (res.ok) {
+                  alert(`Processed successfully! Sent ${data.sent || 0} due AI replies.`);
+                  fetchReplies();
+                } else {
+                  alert(data.error || "Failed to process AI replies");
+                }
+              } catch (err) {
+                alert("Error processing AI replies");
+              } finally {
+                setLoading(false);
+              }
+            }}
+            disabled={loading}
+            className="flex items-center space-x-2 px-4 py-2 bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 rounded-lg font-medium transition-colors border border-purple-500/30 disabled:opacity-50"
+            title="Locally trigger AI auto-replies that are scheduled"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            <span>Send Due Auto-Replies</span>
+          </button>
+          
+          <button
+            onClick={async () => {
+              setLoading(true);
+              try {
+                const res = await fetch("/api/email/poll-replies");
+                const data = await res.json();
+                if (res.ok) {
+                  alert(`Synced successfully! Found ${data.processedCount || 0} new replies.`);
+                  fetchReplies();
+                } else {
+                  alert(data.error || "Failed to sync replies");
+                }
+              } catch (err) {
+                alert("Error syncing replies");
+              } finally {
+                setLoading(false);
+              }
+            }}
+            disabled={loading}
+            className="flex items-center space-x-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium transition-colors border border-slate-700 disabled:opacity-50"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            <span>Sync Inbox</span>
+          </button>
         </div>
       </div>
+
+
+      {hasAiMode ? (
+        <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-4 flex items-start space-x-3 text-purple-400">
+          <MessageSquare size={20} className="shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-semibold mb-1">AI Auto-Reply Mode is Active on some campaigns</p>
+            <p>AI automatically reads replies, categorizes them, and queues responses. Highly confident responses will be sent automatically based on campaign settings.</p>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex items-start space-x-3 text-blue-400">
+          <MessageSquare size={20} className="shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-semibold mb-1">Human Handle Mode is Enabled globally</p>
+            <p>AI automatically reads replies and categorizes them below, but it will not auto-send responses. You must manually review and action each reply.</p>
+          </div>
+        </div>
+      )}
 
       <div className="glass rounded-2xl border border-slate-700/50 overflow-hidden">
         {loading ? (
@@ -184,13 +261,62 @@ export default function RepliesPage() {
                         </div>
                       </div>
                     )}
+                    {reply.recommendedAction && <span className="text-xs text-slate-500 mt-2 italic block">Recommendation: {reply.recommendedAction}</span>}
+                  </div>
+                )}
 
-                    <div className="mt-3 flex space-x-2">
-                       <button className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded transition-colors">
-                         Edit & Send Reply (Coming Soon)
-                       </button>
-                       {reply.recommendedAction && <span className="text-xs text-slate-500 mt-2 italic">Recommendation: {reply.recommendedAction}</span>}
+                {/* Manual Reply Editor */}
+                {editingReplyId === reply.id ? (
+                  <div className="mt-4 bg-slate-800 rounded-lg border border-slate-600 p-4">
+                    <div className="mb-3">
+                      <label className="block text-xs font-medium text-slate-400 mb-1">Subject</label>
+                      <input 
+                        type="text"
+                        value={replySubject}
+                        onChange={(e) => setReplySubject(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-white"
+                        placeholder="Re: Subject"
+                      />
                     </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-400 mb-1">Message</label>
+                      <textarea
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded p-3 text-sm text-white h-32 resize-y"
+                        placeholder="Type your reply here..."
+                      />
+                    </div>
+                    <div className="mt-3 flex justify-end space-x-2">
+                      <button 
+                        onClick={() => setEditingReplyId(null)}
+                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        onClick={() => handleSendReply(reply.id)}
+                        disabled={sendingReply || !replyText.trim()}
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded flex items-center space-x-2 transition-colors disabled:opacity-50"
+                      >
+                        {sendingReply && <Loader2 size={14} className="animate-spin" />}
+                        <span>Send Reply</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3">
+                    <button 
+                      onClick={() => {
+                        setEditingReplyId(reply.id);
+                        setReplyText(reply.aiSuggestedReply || "");
+                        setReplySubject(`Re: ${reply.campaign?.name || "Campaign"}`);
+                      }}
+                      className="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 border border-purple-500/30 text-xs font-bold rounded transition-colors flex items-center space-x-2"
+                    >
+                      <ReplyIcon size={14} />
+                      <span>{reply.aiSuggestedReply ? "Edit & Send AI Reply" : "Reply Manually"}</span>
+                    </button>
                   </div>
                 )}
               </div>

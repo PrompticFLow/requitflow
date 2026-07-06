@@ -61,11 +61,11 @@ export async function POST(req: Request) {
     }
 
     // Call OpenRouter for Analysis
-    const openRouterKey = process.env.OPENROUTER_API_KEY;
+    const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
     let structuredData = null;
     let status = 'Pending AI Analysis';
     
-    if (openRouterKey) {
+    if (bayOfAssetsKey) {
       const prompt = `You are an expert resume parser.
 
 Extract structured information only from the supplied resume text.
@@ -91,14 +91,14 @@ Return only valid JSON without markdown:
 "summary": ""
 }`;
       try {
-        const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        const aiRes = await fetch(`${process.env.BAYOFASSETS_BASE_URL}/chat/completions`, {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${openRouterKey}`,
+            'Authorization': `Bearer ${bayOfAssetsKey}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
+            model: process.env.BAYOFASSETS_MODEL || 'google/gemini-2.5-flash',
             messages: [{ role: 'user', content: prompt }],
             response_format: { type: 'json_object' }
           })
@@ -113,7 +113,7 @@ Return only valid JSON without markdown:
           await prisma.aPIUsage.create({
             data: {
               userId: user.id,
-              provider: 'OpenRouter',
+              provider: 'Bay of Assets',
               endpoint: '/resume-parse',
               requestCount: 1,
             }

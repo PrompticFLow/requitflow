@@ -22,15 +22,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
     }
 
-    // Verify leads belong to user
-    const leads = await prisma.lead.findMany({
+    // Verify leads belong to user (fetching from RawLead now)
+    const rawLeads = await prisma.rawLead.findMany({
       where: {
         id: { in: leadIds },
         userId: user.id
       }
     });
 
-    if (leads.length === 0) {
+    if (rawLeads.length === 0) {
       return NextResponse.json({ error: 'No valid leads found' }, { status: 404 });
     }
 
@@ -38,10 +38,46 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const skippedIds = [];
     const invalidSkipped = [];
 
-    for (const lead of leads) {
-      if (lead.status === 'Invalid' && !forceInvalid) {
-        invalidSkipped.push(lead.id);
+    for (const raw of rawLeads) {
+      // CRM Rule: Only valid leads can be added to campaigns
+      if (raw.validationStatus !== 'valid' && raw.validationStatus !== 'Valid' && !forceInvalid) {
+        invalidSkipped.push(raw.id);
         continue;
+      }
+
+      // Check if CRM Lead already exists
+      let lead = null;
+      const OR_conditions: any[] = [{ rawLeadId: raw.id }];
+      if (raw.email) OR_conditions.push({ email: raw.email });
+      if (raw.linkedinUrl) OR_conditions.push({ linkedinUrl: raw.linkedinUrl });
+
+      lead = await prisma.lead.findFirst({
+        where: {
+          userId: user.id,
+          OR: OR_conditions
+        }
+      });
+
+      if (!lead) {
+        // Bridge RawLead to CRM Lead
+        lead = await prisma.lead.create({
+          data: {
+            userId: user.id,
+            rawLeadId: raw.id,
+            fullName: raw.fullName,
+            firstName: raw.fullName?.split(' ')[0] || undefined,
+            lastName: raw.fullName?.split(' ').slice(1).join(' ') || undefined,
+            linkedinUrl: raw.linkedinUrl,
+            jobTitle: raw.jobTitle,
+            location: raw.location,
+            email: raw.email,
+            phone: raw.phone,
+            businessName: raw.companyName || 'Unknown',
+            source: 'Apify Person Search',
+            status: 'Added to Campaign',
+            campaignId: campaignId
+          }
+        });
       }
 
       // Check for existing campaign lead
@@ -69,9 +105,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           data: { status: 'Added to Campaign', campaignId: campaignId }
         });
         
-        addedIds.push(lead.id);
+        addedIds.push(raw.id);
       } else {
-        skippedIds.push(lead.id);
+        skippedIds.push(raw.id);
       }
     }
 

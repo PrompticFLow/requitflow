@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { generateText } from '@/services/openrouter';
+import { generateText } from '@/services/bayofassets';
 import { runApifyActor } from '@/lib/hiring/apify';
 import { normalizeApifyJob } from '@/lib/hiring/normalization';
 
@@ -155,8 +155,8 @@ export async function POST(req: Request) {
     }
     
     // AI Analysis (limited to top 3 to prevent timeouts)
-    const openRouterKey = process.env.OPENROUTER_API_KEY;
-    if (openRouterKey && finalJobs.length > 0) {
+    const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
+    if (bayOfAssetsKey && finalJobs.length > 0) {
        await Promise.all(finalJobs.slice(0, 3).map(async (job) => {
           try {
              if (job.description && !job.aiSummary) {
@@ -165,7 +165,7 @@ Title: ${job.title}
 Desc: ${job.description.substring(0, 1000)}
 
 Please return a concise 2-sentence summary of the role and any core skills.`;
-               const aiSummary = await generateText(openRouterKey, prompt, process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash');
+               const aiSummary = await generateText(bayOfAssetsKey, prompt, process.env.BAYOFASSETS_MODEL || 'google/gemini-2.5-flash');
                job.aiSummary = aiSummary;
                await prisma.job.update({
                   where: { id: job.id },

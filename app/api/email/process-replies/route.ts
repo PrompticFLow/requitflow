@@ -9,8 +9,14 @@ export const maxDuration = 300;
 export async function GET(req: Request) {
   try {
     const authHeader = req.headers.get('authorization');
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const hasCronSecret = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+
+    if (!hasCronSecret) {
+      const { getCurrentUser } = await import('@/lib/auth');
+      const user = await getCurrentUser();
+      if (!user) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
     }
 
     const now = new Date();
@@ -19,11 +25,7 @@ export async function GET(req: Request) {
       where: {
         aiReplyStatus: 'Queued',
         aiReplyScheduledAt: { lte: now },
-        canAutoSend: true,
-        campaign: {
-          autoReplyEnabled: true,
-          autoReplyMode: 'auto_send_safe',
-        }
+        canAutoSend: true
       },
       include: {
         user: true,
@@ -80,20 +82,33 @@ export async function GET(req: Request) {
             auth: { user: username, pass },
           });
 
-          await transporter.sendMail({
+          const mailOptions: any = {
             from: `"${fromName}" <${fromEmail}>`,
             to: reply.fromEmail,
             subject: reply.aiReplySubject || `Re: ${reply.subject}`,
             text: reply.aiSuggestedReply || '',
-          });
+          };
+          if ((reply as any).messageId) {
+            mailOptions.headers = {
+              'In-Reply-To': (reply as any).messageId,
+              'References': (reply as any).messageId
+            };
+          }
+          await transporter.sendMail(mailOptions);
         } else if (hasSendGrid) {
           sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
-          const msg = {
+          const msg: any = {
             to: reply.fromEmail,
             from: { email: process.env.SENDGRID_FROM_EMAIL!, name: fromName },
             subject: reply.aiReplySubject || `Re: ${reply.subject}`,
             text: reply.aiSuggestedReply || '',
           };
+          if ((reply as any).messageId) {
+            msg.headers = {
+              'In-Reply-To': (reply as any).messageId,
+              'References': (reply as any).messageId
+            };
+          }
           await sgMail.send(msg);
         }
 

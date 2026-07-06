@@ -16,6 +16,7 @@ export default function CampaignDetailPage() {
   const [generating, setGenerating] = useState(false);
   const [genProgress, setGenProgress] = useState("");
   const [expandedLead, setExpandedLead] = useState<string | null>(null);
+  const [campaignReplies, setCampaignReplies] = useState<any[]>([]);
   
   // Knowledge Base State
   const [kbFiles, setKbFiles] = useState<any[]>([]);
@@ -43,6 +44,12 @@ export default function CampaignDetailPage() {
       if (kbRes.ok) {
         const kbData = await kbRes.json();
         setKbFiles(kbData.files || []);
+      }
+
+      const repliesRes = await fetch(`/api/replies?campaignId=${campaignId}`);
+      if (repliesRes.ok) {
+        const repliesData = await repliesRes.json();
+        setCampaignReplies(repliesData.replies || []);
       }
     } catch(e) {
       console.error(e);
@@ -260,7 +267,14 @@ export default function CampaignDetailPage() {
                        const res = await fetch(`/api/campaigns/${campaignId}/start-sending`, { method: "POST" });
                        const data = await res.json();
                        if (res.ok) alert("Campaign started! Email 1 is being sent.");
-                       else alert(data.error || "Failed to start campaign.");
+                       else {
+                         const missing = data.missingRequirements || data.missing;
+                         if (missing && missing.length > 0) {
+                           alert(`Failed to start campaign. Missing Requirements:\n\n- ${missing.join('\n- ')}`);
+                         } else {
+                           alert(data.error || "Failed to start campaign.");
+                         }
+                       }
                      } catch(e) { console.error(e); }
                    }}
                    className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors font-bold shadow-lg shadow-green-500/20"
@@ -275,7 +289,7 @@ export default function CampaignDetailPage() {
                  <AlertTriangle size={20} className="mt-0.5 shrink-0" />
                  <div>
                    <p className="font-semibold">{campaignLeads.filter(cl => !cl.lead.email || cl.lead.emailStatus === 'Missing').length} leads are missing email addresses.</p>
-                   <p className="text-sm opacity-90">Enrich contacts on the Candidate Database page before starting an email campaign. Leads without emails will be skipped.</p>
+                   <p className="text-sm opacity-90">Enrich contacts on the Person Leads Database page before starting an email campaign. Leads without emails will be skipped.</p>
                  </div>
                </div>
              )}
@@ -348,7 +362,7 @@ export default function CampaignDetailPage() {
            <div className="flex justify-between items-center bg-slate-900/50 p-6 rounded-2xl border border-slate-700/50">
              <div>
                <h3 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
-                 <Users className="text-purple-400" size={20} /> Candidate Database
+                 <Users className="text-purple-400" size={20} /> Person Leads Database
                </h3>
                <p className="text-sm text-slate-400">Leads assigned to this campaign for AI email outreach.</p>
              </div>
@@ -357,7 +371,7 @@ export default function CampaignDetailPage() {
                  onClick={() => window.location.href = '/dashboard/person-leads'} 
                  className="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors shadow-lg shadow-purple-500/25 text-sm font-bold"
                >
-                 Go to Candidate Database
+                 Go to Person Leads Database
                </button>
              </div>
            </div>
@@ -365,9 +379,9 @@ export default function CampaignDetailPage() {
            {campaignLeads.length === 0 ? (
              <div className="glass p-12 rounded-2xl border border-slate-700/50 text-center">
                <h3 className="text-lg text-white mb-2">No leads added yet.</h3>
-               <p className="text-slate-400 text-sm mb-4">Add candidate leads from Candidate Database.</p>
+               <p className="text-slate-400 text-sm mb-4">Add person leads from the Person Leads Database.</p>
                <Link href="/dashboard/person-leads" className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-2 mt-auto">
-                    <Search size={16} /> Go to Candidate Database
+                    <Search size={16} /> Go to Person Leads Database
                </Link>
              </div>
            ) : (
@@ -679,12 +693,46 @@ export default function CampaignDetailPage() {
          </div>
       ) : activeTab === "Replies Inbox" ? (
          <div className="space-y-6">
-            <div className="glass p-8 rounded-2xl border border-slate-700/50">
-               <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><MessageSquare className="text-purple-400" /> Replies Inbox</h3>
-               <div className="text-center py-12 bg-slate-900/50 rounded-xl border border-slate-700">
-                 <p className="text-slate-400">Replies will appear here once the campaign starts and leads respond.</p>
+            <div className="flex justify-between items-center bg-slate-900/50 p-6 rounded-2xl border border-slate-700/50">
+               <div>
+                  <h3 className="text-xl font-bold text-white mb-1 flex items-center gap-2"><MessageSquare className="text-purple-400" /> Replies Inbox</h3>
+                  <p className="text-slate-400 text-sm">View all AI and Human replies for this campaign.</p>
                </div>
+               <Link href={`/dashboard/replies`} className="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors text-sm font-bold shadow-lg shadow-purple-500/25">
+                 Open Full Replies Dashboard
+               </Link>
             </div>
+            
+            {campaignReplies.length === 0 ? (
+               <div className="text-center py-12 bg-slate-900/50 rounded-xl border border-slate-700">
+                 <p className="text-slate-400">No replies received yet for this campaign.</p>
+               </div>
+            ) : (
+               <div className="space-y-4">
+                 {campaignReplies.map((reply: any) => (
+                   <div key={reply.id} className="glass p-6 rounded-xl border border-slate-700/50">
+                     <div className="flex justify-between items-start mb-4">
+                       <div>
+                         <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                           {reply.lead?.businessName || reply.lead?.email || 'Unknown Lead'}
+                           <span className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded border border-purple-500/30">{reply.aiCategory || 'Unknown'}</span>
+                         </h4>
+                         <p className="text-xs text-slate-400 mt-1">{new Date(reply.createdAt).toLocaleString()}</p>
+                       </div>
+                     </div>
+                     <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mb-4">
+                       <p className="text-sm text-slate-300 whitespace-pre-wrap">{reply.emailBody}</p>
+                     </div>
+                     {reply.aiSuggestedReply && (
+                       <div className="bg-purple-900/10 border border-purple-500/20 rounded-lg p-4">
+                         <p className="text-xs text-purple-400 font-semibold mb-2 flex items-center gap-1"><MessageSquare size={14} /> AI Suggested Response / Sent Reply</p>
+                         <p className="text-sm text-purple-200/80 whitespace-pre-wrap">{reply.aiSuggestedReply}</p>
+                       </div>
+                     )}
+                   </div>
+                 ))}
+               </div>
+            )}
          </div>
       ) : activeTab === "Settings" ? (
          <div className="space-y-6">
@@ -726,7 +774,21 @@ export default function CampaignDetailPage() {
                  <div className="space-y-4">
                    <h4 className="text-white font-semibold">AI Reply & Automation</h4>
                    <label className="block text-sm text-slate-400">AI Reply Mode</label>
-                   <select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white">
+                   <select 
+                     value={campaignData?.autoReplyMode || 'draft_first'}
+                     onChange={async (e) => {
+                       const mode = e.target.value;
+                       try {
+                         const res = await fetch(`/api/campaigns/${campaignId}`, {
+                           method: 'PATCH',
+                           headers: { 'Content-Type': 'application/json' },
+                           body: JSON.stringify({ autoReplyMode: mode, autoReplyEnabled: mode !== 'manual_only' })
+                         });
+                         if (res.ok) fetchCampaignData();
+                       } catch(err) { console.error(err); }
+                     }}
+                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white"
+                   >
                      <option value="draft_first">Draft First (Recommended)</option>
                      <option value="auto_send_safe">Auto-send Safe Replies</option>
                      <option value="manual_only">Manual Only</option>

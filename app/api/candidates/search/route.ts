@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { getJobBoardApiKey } from '@/lib/jobBoard';
-import { generateText } from '@/services/openrouter';
+import { generateText } from '@/services/bayofassets';
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
 
   // 4. AI Scoring Logic
   const settings = await prisma.userSettings.findUnique({ where: { userId: user.id } });
-  const openrouterKey = process.env.OPENROUTER_API_KEY;
+  const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
 
   const processedCandidates = [];
 
@@ -81,13 +81,13 @@ export async function POST(req: Request) {
     let matchScore = 75; // Fallback score
     let aiSummary = "Solid candidate matching general criteria. Good technical background.";
     
-    if (openrouterKey) {
+    if (bayOfAssetsKey) {
       try {
         const prompt = `You are a technical recruiter. Evaluate this candidate for a role requiring: ${searchData.jobTitle || 'General Engineering'}, Skills: ${searchData.skills || 'Any'}, Exp: ${searchData.experienceLevel || 'Any'}.
 Candidate Info: Name: ${c.name}, Exp: ${c.experience}, Skills: ${c.skills}.
 Output JSON exactly like this: { "score": 85, "summary": "Short 2 sentence summary of strengths and best outreach angle." }`;
         
-        const aiRaw = await generateText(openrouterKey, prompt, settings?.openrouterModel || 'openai/gpt-4o-mini');
+        const aiRaw = await generateText(bayOfAssetsKey, prompt, settings?.bayOfAssetsModel || 'openai/gpt-4o-mini');
         const match = aiRaw.match(/\{[\s\S]*\}/);
         if (match) {
           const parsed = JSON.parse(match[0]);

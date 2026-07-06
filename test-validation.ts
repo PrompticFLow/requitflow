@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { getApifyDatasetItems } from "./lib/apify/client";
-import { normalizeLinkedInProfileLead } from "./lib/person-lead-normalizer";
+import { normalizePersonLead } from './lib/person-lead-normalizer';
 import { validatePersonLead } from "./lib/person-lead-validation";
 
 async function run() {
@@ -16,7 +16,7 @@ async function run() {
     let invalidCount = 0;
 
     for (const raw of rawItems) {
-      const normalized = normalizeLinkedInProfileLead(raw);
+      const normalized = normalizePersonLead(raw);
       const validated = validatePersonLead(normalized);
 
       if (validated.validationStatus === "Valid") validCount++;
@@ -35,7 +35,7 @@ async function run() {
       console.log("\nFirst Raw Item snippet:");
       console.log(JSON.stringify(rawItems[0], null, 2).slice(0, 500));
       
-      const firstNormalized = normalizeLinkedInProfileLead(rawItems[0]);
+      const firstNormalized = normalizePersonLead(rawItems[0]);
       const firstValidated = validatePersonLead(firstNormalized);
       console.log("\nFirst Validated Item:");
       console.log(JSON.stringify(firstValidated, null, 2));

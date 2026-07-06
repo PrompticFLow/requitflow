@@ -1,5 +1,5 @@
-import { generateText } from '@/services/openrouter';
-import { recommendNextSendTime, getDefaultSequenceDelays } from '@/lib/scheduling';
+import { generateText } from '@/services/bayofassets';
+import { recommendNextSendTime, getDefaultSequenceDelays, getSevenStepSequenceDelays } from '@/lib/scheduling';
 
 export async function generateSevenStepSequence(
   apiKey: string,
@@ -14,27 +14,25 @@ export async function generateSevenStepSequence(
     : 'No Knowledge Base available. Use value-based messaging.';
 
   const prompt = `You are an expert AI outbound sales agent.
-Generate a seven-step personalized follow-up sequence for this specific recipient.
-Use only supplied campaign, recipient, public business context, and Knowledge Base information.
+Generate a five-step personalized follow-up sequence for this specific recipient.
 
-Never assume the business is a recruitment agency unless the user clearly says so.
-Do not invent:
-- Case studies
-- Client names
-- Specific statistics
-- Pricing
-- Testimonials
+CRITICAL RULES FOR EMAIL GENERATION:
+1. DO NOT just list or regurgitate the provided campaign data or variables (e.g., do not say "Our offer is X. We solve Y."). 
+2. Weave the context organically into a conversational, human-to-human narrative.
+3. Write persuasive, engaging, and highly personalized emails.
+4. Keep emails concise, natural, professional, and respectful. Do not sound automated or overly persistent. 
+5. Use one clear, low-friction Call to Action (CTA) per email.
+6. Never assume the business is a recruitment agency unless the user clearly says so.
+7. Do not invent: Case studies, Client names, Specific statistics, Pricing, or Testimonials. Use only the provided context or knowledge base.
+8. NAME DETECTION: Analyze the recipient's provided 'Name' or 'Company'. If the name contains a mix of person and company (e.g., "John Doe - Acme Corp"), intelligently extract ONLY the person's actual first name for the greeting. If it's entirely a company name with no person's name, use a generic greeting like "Hi there,".
 
 Every email should have a different purpose as follows:
-Step 1: Personalized Introduction with soft CTA.
-Step 2: Follow-up. Ask one simple question.
-Step 3: Value and Process. Focus on the core problem solved.
-Step 4: Proof or Case Study. ONLY use proof from the Knowledge Base or campaign context. If missing, use a value-based angle.
-Step 5: Objection Reduction.
-Step 6: Direct Call-Booking Follow-Up.
-Step 7: Respectful Final Follow-Up. Include opt-out/polite closure.
-
-Keep emails concise, natural, professional, and respectful. Do not sound automated or overly persistent. Use one clear CTA per email.
+Initial Outreach Sequence (5 Emails):
+Step 1: Introduction + Hook. Catch their attention with something specific about them.
+Step 2: Value + Problem awareness. Highlight a specific pain point and how you solve it.
+Step 3: Proof + Case study. ONLY use proof from the Knowledge Base or campaign context. If missing, use a value-based angle.
+Step 4: Soft follow-up / reminder. Very brief.
+Step 5: Final breakup email. Professional and leaving the door open.
 
 [Campaign Context]
 Campaign Name: ${campaign.name || 'Outreach Campaign'}
@@ -60,6 +58,15 @@ Hiring Demand: ${recipient.hiringDemand || 'Unknown'}
 
 [Knowledge Base Context]
 ${kbContext}
+
+[AI Strategy Builder Context]
+${campaign.aiAnalysis ? `
+Target Audience Analysis: ${campaign.aiAnalysis.messagingAngle || 'N/A'}
+User's Deep Context (Q&A):
+${campaign.aiAnalysis.userQnA ? campaign.aiAnalysis.userQnA.map((a: any, i: number) => `Q: ${a.question}\nA: ${a.answer}`).join('\n') : 'N/A'}
+Generated Discovery Questions to ask the prospect (Use 1 per relevant email):
+${campaign.aiAnalysis.generatedQuestions ? campaign.aiAnalysis.generatedQuestions.map((q: string, i: number) => `${i + 1}. ${q}`).join('\n') : 'N/A'}
+` : 'No pre-generated strategy available.'}
 
 Return valid JSON only matching this schema exactly:
 {
@@ -101,8 +108,8 @@ Return valid JSON only matching this schema exactly:
     // Validate we got 7 steps
     let steps = parsed.sequence.slice(0, 7);
     
-    // Fill in defaults if AI missed delays
-    const defaultDelays = getDefaultSequenceDelays();
+    // Fill in defaults if AI missed delays (Using 7-step delays specifically to prevent out of bounds crashes)
+    const defaultDelays = getSevenStepSequenceDelays();
     
     steps = steps.map((step: any, idx: number) => {
       const defaultStep = defaultDelays[idx];

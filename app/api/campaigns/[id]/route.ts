@@ -74,7 +74,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       'autoCreateCalendarEvent', 'autoSendBookingConfirmation',
       'knowledgeBaseMode', 'selectedKnowledgeBaseFileIds',
       'personalizationLevel', 'personalizationStyle', 'mentionCompanyName',
-      'companyFallback', 'useKnowledgeBase', 'emailLength', 'spamSafety', 'ctaStyle'
+      'companyFallback', 'useKnowledgeBase', 'emailLength', 'spamSafety', 'ctaStyle',
+      'autoReplyEnabled', 'autoReplyMode'
     ];
 
     for (const field of editableFields) {
@@ -108,6 +109,8 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 
   try {
     const { id } = await params;
+    const { searchParams } = new URL(req.url);
+    const force = searchParams.get('force') === 'true';
 
     const campaign = await prisma.campaign.findUnique({
       where: { id, userId: user.id },
@@ -122,7 +125,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
       return NextResponse.json({ error: 'Campaign not found.' }, { status: 404 });
     }
 
-    if (campaign._count.emailSequences > 0) {
+    if (campaign._count.emailSequences > 0 && !force) {
       // Soft delete / archive if emails were sent
       await prisma.campaign.update({
         where: { id },

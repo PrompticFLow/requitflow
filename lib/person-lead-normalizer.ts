@@ -79,77 +79,23 @@ function cleanLinkedInUrl(url: string | null) {
   return url;
 }
 
-export function normalizeLinkedInProfileLead(raw: any, fallback?: { industry?: string, location?: string, companyNote?: string }) {
-  // Extract Name
-  const fullName = pickFirstString(raw.fullName, raw.full_name, raw.name, raw.profileName, raw.personName) || null;
-  const rawFirstName = pickFirstString(raw.firstName, raw.first_name);
-  const rawLastName = pickFirstString(raw.lastName, raw.last_name);
-  
-  let firstName = rawFirstName;
-  let lastName = rawLastName;
-  
-  if (fullName && !firstName && !lastName) {
-    const parts = fullName.split(' ');
-    firstName = parts[0];
-    lastName = parts.slice(1).join(' ');
-  } else if (!fullName && firstName && lastName) {
-    // If we only have pieces, that's fine too.
-  }
-
-  // Email
-  let email = pickFirstString(raw.email, raw.emails) || null;
-  if (email) email = email.toLowerCase();
-
-  // Phone
-  let phone = pickFirstString(raw.phone, raw.phoneNumber, raw.mobile, raw.phones) || null;
-
-  // Job Title
-  let jobTitle = pickFirstString(raw.jobTitle, raw.title, raw.headline, raw.occupation, raw.position, raw.currentPosition) || null;
-  
-  // Company Name
-  let companyName = pickFirstString(raw.companyName, raw.company, raw.currentCompany, raw.organization, raw.employer) || null;
-  
-  if (raw.positions && Array.isArray(raw.positions) && raw.positions.length > 0) {
-    const current = raw.positions[0];
-    if (!jobTitle && current.title) jobTitle = current.title;
-    if (!companyName && current.companyName) companyName = current.companyName;
-  }
-
-  // Location/Industry
-  let location = pickFirstString(raw.location, raw.geoLocation, raw.address, raw.city, raw.countryCode, raw.country) || null;
-  let country = pickFirstString(raw.countryCode, raw.country) || null;
-  let industry = pickFirstString(raw.industry) || null;
-  
-  if (!industry && fallback?.industry) industry = fallback.industry;
-  if (!location && fallback?.location) location = fallback.location;
-
-  // URLs
-  let linkedinUrl = cleanLinkedInUrl(pickFirstString(raw.linkedinUrl, raw.profileUrl, raw.url, raw.link, raw.linkedin, raw.profile_link)) || null;
-  if (!linkedinUrl && raw.publicIdentifier) linkedinUrl = `https://www.linkedin.com/in/${raw.publicIdentifier}`;
-  
-  let website = pickFirstString(raw.website, raw.website_url, raw.companyWebsite, raw.websites) || null;
-
+export function normalizePersonLead(item: any) {
   return {
-    firstName,
-    lastName,
-    fullName: fullName || (firstName && lastName ? `${firstName} ${lastName}` : null),
-    email,
-    emailStatus: email ? 'Unknown' : 'Missing',
-    phone,
-    phoneStatus: phone ? 'Found' : 'Missing',
-    jobTitle,
-    companyName,
-    businessName: companyName,
-    website,
-    linkedinUrl,
-    location,
-    country,
-    industry,
+    linkedinUrl: item.url || item.public_identifier,
+    fullName: item.full_name || "Unknown",
+    jobTitle: item.title || "",
+    location: item.location || "",
+    isVerified: item.is_verified || false,
+
+    // IMPORTANT: always null (actor limitation)
+    email: null,
+    phone: null,
+
+    // Required by DB/validation
     source: "LinkedIn",
-    sourceUrl: linkedinUrl,
     validationStatus: "Unknown", 
     aiFitScore: 0,           
     aiFitReason: null,          
-    rawData: raw
+    rawData: item
   };
 }

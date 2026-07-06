@@ -2,13 +2,18 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { ArrowRight, UserPlus, LogIn } from "lucide-react";
+import { UserPlus, LogIn, KeyRound, X, Mail } from "lucide-react";
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [mounted, setMounted] = useState(false);
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotSuccess, setForgotSuccess] = useState("");
+  const [forgotError, setForgotError] = useState("");
 
   useEffect(() => {
     setMounted(true);
@@ -50,6 +55,29 @@ export default function AuthPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotLoading(true);
+    setForgotError("");
+    setForgotSuccess("");
+    try {
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: forgotEmail })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setForgotSuccess("If that email exists, a reset link has been sent. Check your inbox.");
+      } else {
+        setForgotError(data.error || "Something went wrong. Please try again.");
+      }
+    } catch {
+      setForgotError("Network error. Please try again.");
+    }
+    setForgotLoading(false);
   };
 
   if (!mounted) {
@@ -138,7 +166,18 @@ export default function AuthPage() {
           </div>
           
           <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Password</label>
+            <div className="flex justify-between items-center mb-1.5">
+              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Password</label>
+              {isLogin && (
+                <button
+                  type="button"
+                  onClick={() => { setShowForgotModal(true); setForgotEmail(email); setForgotSuccess(""); setForgotError(""); }}
+                  className="text-xs text-purple-400 hover:text-purple-300 transition-colors font-medium"
+                >
+                  Forgot password?
+                </button>
+              )}
+            </div>
             <input 
               required 
               value={password} 
@@ -164,6 +203,67 @@ export default function AuthPage() {
             )}
           </button>
         </form>
+      </div>
+
+      {/* Forgot Password Modal */}
+      {showForgotModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-sm bg-slate-900 border border-slate-700/50 rounded-2xl p-8 shadow-2xl relative">
+            <button
+              onClick={() => { setShowForgotModal(false); setForgotSuccess(""); setForgotError(""); }}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+            >
+              <X size={20} />
+            </button>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-xl bg-purple-600/20 flex items-center justify-center">
+                <KeyRound size={20} className="text-purple-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Forgot Password</h3>
+                <p className="text-xs text-slate-400">We'll send a reset link to your email</p>
+              </div>
+            </div>
+
+            {forgotSuccess ? (
+              <div className="bg-green-500/10 border border-green-500/20 text-green-400 rounded-xl p-4 text-sm text-center">
+                <Mail size={20} className="mx-auto mb-2" />
+                {forgotSuccess}
+              </div>
+            ) : (
+              <form onSubmit={handleForgotPassword} className="space-y-4">
+                {forgotError && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm text-center">
+                    {forgotError}
+                  </div>
+                )}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Email Address</label>
+                  <input
+                    required
+                    type="email"
+                    value={forgotEmail}
+                    onChange={e => setForgotEmail(e.target.value)}
+                    placeholder="you@company.com"
+                    className="w-full bg-slate-950/50 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={forgotLoading}
+                  className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-70"
+                >
+                  {forgotLoading ? <span className="animate-pulse">Sending...</span> : <><Mail size={16} /><span>Send Reset Link</span></>}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+      {/* Footer Links */}
+      <div className="absolute bottom-4 left-0 right-0 text-center text-xs text-slate-500">
+        <a href="/privacy" className="hover:text-slate-300 transition-colors mr-4">Privacy Policy</a>
+        <a href="/terms" className="hover:text-slate-300 transition-colors">Terms of Service</a>
       </div>
     </div>
   );

@@ -47,9 +47,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: "Find Client Leads", href: "/dashboard/generate-leads", icon: UserPlus },
     // { name: "Job & Hiring Search", href: "/dashboard/job-search", icon: Search },
     { name: "Person Leads", href: "/dashboard/person-leads", icon: Search },
-    // { name: "Search Candidates", href: "/dashboard/search-candidates", icon: Search },
     { name: "Client Lead Database", href: "/dashboard/leads", icon: Users },
-    // { name: "Candidate Database (Old)", href: "/dashboard/candidates", icon: Users },
     // { name: "Saved Jobs", href: "/dashboard/saved-jobs", icon: BookOpen },
     // { name: "Applied Jobs", href: "/dashboard/applied-jobs", icon: KanbanSquare },
     // { name: "Resume Match", href: "/dashboard/resume-match", icon: Users },
@@ -63,8 +61,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
     { name: "Calendar", href: "/dashboard/calendar", icon: Calendar },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
-    { name: "Billing", href: "/dashboard/billing", icon: CreditCard },
-    { name: "Admin", href: "/dashboard/admin", icon: Users },
   ];
 
   return (

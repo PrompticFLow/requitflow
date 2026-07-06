@@ -1,8 +1,7 @@
 export async function generateAiResponse(prompt: string): Promise<any> {
   const providerRaw = (process.env.AI_PROVIDER || '').trim().toLowerCase();
-  let provider = 'google';
-  if (providerRaw === 'bayofassets') provider = 'bayofassets';
-  else if (providerRaw === 'openrouter') provider = 'openrouter';
+  let provider = 'bayofassets';
+  if (providerRaw === 'google') provider = 'google';
 
   if (provider === 'google') {
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY;
@@ -98,44 +97,40 @@ export async function generateAiResponse(prompt: string): Promise<any> {
 
     return content;
   } else {
-    // OpenRouter fallback
-    const openrouterKey = process.env.OPENROUTER_API_KEY;
-    if (!openrouterKey) {
-      throw new Error('OpenRouter API key is not configured.');
+    // Default fallback to Bay of Assets
+    const apiKey = process.env.BAYOFASSETS_API_KEY;
+    if (!apiKey) {
+      throw new Error('Bay of Assets API key is not configured.');
     }
 
-    const openrouterModel = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
+    const baseUrl = process.env.BAYOFASSETS_BASE_URL || 'https://api.bayofassets.com';
+    const model = process.env.BAYOFASSETS_MODEL || 'default-model';
 
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${openrouterKey}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://funnelzenai.com',
-        'X-Title': 'FunnelZen AI'
       },
       body: JSON.stringify({
-        model: openrouterModel,
+        model: model,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.2,
-        max_tokens: 2048
+        max_tokens: 2048,
+        stream: false
       })
     });
 
-    const orData = await res.json();
-    if (orData.error) {
-      const errMsg = orData.error.message || JSON.stringify(orData.error);
-      if (errMsg.toLowerCase().includes('valid model') || errMsg.toLowerCase().includes('does not exist')) {
-        throw new Error('AI model is not configured correctly. Please update OPENROUTER_MODEL.');
-      }
-      throw new Error(`OpenRouter Error: ${errMsg}`);
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      throw new Error(`Bay of Assets AI provider failed: ${data.error?.message || JSON.stringify(data)}`);
     }
 
-    const content = orData.choices?.[0]?.message?.content;
+    const content = data.choices?.[0]?.message?.content;
     console.log("AI response content length:", content?.length || 0);
 
     if (!content) {
-      throw new Error('AI returned an empty response. Please try again.');
+      throw new Error('Bay of Assets returned an empty response. Please try again.');
     }
 
     return content;

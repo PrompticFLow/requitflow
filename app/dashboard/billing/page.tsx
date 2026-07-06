@@ -3,7 +3,7 @@ import { CreditCard, CheckCircle2, Zap } from "lucide-react";
 export default function BillingPlaceholder() {
   const plans = [
     { name: "Starter", price: "$49", features: ["1,000 Client Leads/mo", "Basic Email Automation", "1 Email Account Connect"] },
-    { name: "Pro", price: "$149", features: ["10,000 Client Leads/mo", "Advanced AI Personalization", "5 Email Accounts Connect", "AI Agent Candidate Search"] },
+    { name: "Pro", price: "$149", features: ["10,000 Client Leads/mo", "Advanced AI Personalization", "5 Email Accounts Connect", "AI Agent Lead Search"] },
     { name: "Agency", price: "$299", features: ["Unlimited Leads", "White-label Dashboard", "Unlimited Email Accounts"] }
   ];
 
@@ -62,7 +62,7 @@ export default function BillingPlaceholder() {
             <div className="w-full bg-slate-800 h-1.5 rounded-full mt-3"><div className="bg-pink-500 h-1.5 rounded-full" style={{ width: "0%" }}></div></div>
           </div>
           <div className="glass p-5 rounded-2xl border border-slate-800">
-            <p className="text-slate-400 text-sm font-medium mb-1">Candidates searched</p>
+            <p className="text-slate-400 text-sm font-medium mb-1">Leads sourced</p>
             <div className="flex items-end space-x-2">
               <h3 className="text-2xl font-bold text-white">0</h3>
               <span className="text-slate-500 text-sm mb-1">/ 0</span>

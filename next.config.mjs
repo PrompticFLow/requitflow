@@ -1,17 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  async rewrites() {
-    return [
-      {
-        source: '/dashboard',
-        destination: '/',
-      },
-      {
-        source: '/dashboard/:path*',
-        destination: '/:path*',
-      },
-    ]
-  },
+  // Removed rewrites to prevent 404s for /dashboard routes
   typescript: {
     ignoreBuildErrors: true,
   },

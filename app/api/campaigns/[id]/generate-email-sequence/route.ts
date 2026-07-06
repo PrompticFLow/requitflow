@@ -42,8 +42,8 @@ function buildKnowledgeContext(kbFiles: any[]): KbResult {
     }
 
     if (hasText) {
-      // Smart extraction: take up to 5000 chars of content to leave room for multiple files
-      const content = file.extractedText.trim().substring(0, 5000);
+      // Allow up to 150,000 chars of content per file to support large docs and pasted URLs
+      const content = file.extractedText.trim().substring(0, 150000);
       section += `\nContent:\n${content}\n`;
     }
 
@@ -62,9 +62,9 @@ function buildKnowledgeContext(kbFiles: any[]): KbResult {
 
   let combined = contextParts.join('\n\n');
 
-  // Hard cap at 8000 characters
-  if (combined.length > 8000) {
-    combined = combined.substring(0, 8000);
+  // Hard cap at 300,000 characters to stay within safe token limits of modern models
+  if (combined.length > 300000) {
+    combined = combined.substring(0, 300000);
   }
 
   return {
@@ -86,7 +86,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { leadIds: providedLeadIds } = body;
+    const { leadIds: providedLeadIds, preview } = body;
 
     // 1. Validate campaign ownership
     const campaign = await prisma.campaign.findUnique({
@@ -113,9 +113,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       }, { status: 400 });
     }
 
-    const leads = await prisma.lead.findMany({
+    let leads = await prisma.lead.findMany({
       where: { id: { in: leadIds }, userId: user.id }
     });
+    
+    if (preview && leads.length > 0) {
+      leads = [leads[0]]; // Only generate for the first lead as a preview
+    }
 
     // 3. Load Knowledge Base files FIRST before any generation
     let kbResult: KbResult = { hasKnowledge: false, context: '', summaries: [], hasEmptyFiles: false, fileCount: 0 };
@@ -202,14 +206,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         });
 
         const prompt = `You are an expert email strategist for a professional business introduction.
-Write a personalized 25-email permission-based outreach sequence for the following prospect spanning 28 days.
+Write a permission-based outreach email.
+YOU ARE AN API. YOU MUST ONLY RETURN JSON.
 
 IMPORTANT:
 You must write emails based on the campaign answers and Knowledge Base.
-Do not write generic outreach.
-Use the lead's first name and company/business name when available.
+Use the lead's first name and company/business name when available. If missing, use generic terms like "there" or "your company".
 Do not invent facts, proof, pricing, guarantees, or results.
-If a detail is missing, use safe fallback language.
+If a detail is missing, use safe fallback language. Do not refuse to generate the email.
 
 Campaign Answers:
 * Goal: \${intel.campaignGoal}
@@ -242,6 +246,7 @@ AI Campaign Analysis (Use these strategies):
 * Objections: \${aiAnalysis?.likelyObjections?.join(', ') || 'None'}
 * Recommended Tone: \${aiAnalysis?.recommendedTone || intel.emailTone}
 * CTA Strategy: \${aiAnalysis?.ctaStrategy || intel.bookingLinkStrategy}
+* Discovery Questions: \${aiAnalysis?.generatedQuestions?.join(' | ') || 'None'}
 
 Lead Personalization:
 * Greeting: \${intel.greeting}
@@ -256,7 +261,9 @@ Lead Personalization:
 * Company fallback: \${intel.companyFallback}
 
 Instructions:
-* Start every email with the exact greeting.
+* Start every email with a personalized greeting.
+* IMPORTANT: Analyze the provided 'First name' or 'Full name'. If it contains a company name, a job title, or a mix of names and companies (e.g., "John Doe - Acme Corp"), intelligently extract ONLY the person's actual first name for the greeting (e.g., "Hi John,").
+* If it is entirely a company name with no person's name, use a generic greeting like "Hi there,".
 * Mention the company/business name naturally when relevant.
 * Use the pain point and desired outcome.
 * Use knowledge base facts only when available.
@@ -265,10 +272,15 @@ Instructions:
 * Keep emails short and human.
 * Never output placeholders.
 * Never output undefined/null.
-* Return valid JSON only.
+* CRITICAL: You MUST output the JSON exactly as requested even if some or all prospect details are missing. DO NOT refuse to generate. Use generic fallback language if a specific detail is missing.
+* Return valid JSON only. Do not apologize or ask for more details.
 
 [EMAIL SEQUENCE STRUCTURE]
-Generate EXACTLY 25 emails. Spread the delays across 28 days (e.g. Day 0, Day 1, Day 2, ... Day 28).
+Generate EXACTLY 1 email (Email 1: Introduction / Hook).
+The delay for the first email is 0.
+
+You MUST strictly follow this funnel structure:
+* Email 1 (Day 0): Introduction / Hook
 
 Return ONLY valid JSON. Do not include markdown. Do not include explanations. Use lowercase keys only.
 
@@ -282,9 +294,9 @@ Return ONLY valid JSON. Do not include markdown. Do not include explanations. Us
 "body": "Hi {{firstName}}, ...",
 "spamRisk": "Low",
 "spamIssues": "None",
-"personalizationReason": "Mentioned their specific pain point."
-},
-... (24 more emails)
+"personalizationReason": "Mentioned their specific pain point.",
+"personalizationScore": 85
+}
 ]
 }
 
@@ -347,19 +359,16 @@ If the model cannot generate, return: {"emails": []}`;
           const signOff = senderName ? `\n\nBest,\n${senderName}` : `\n\nBest,`;
 
           sequenceData = [];
-          for (let i = 1; i <= 25; i++) {
-            const delayDays = i === 1 ? 0 : Math.floor((i - 1) * (28 / 24)); // Spread over 28 days
-            sequenceData.push({
-              step: i,
-              delayDays: delayDays,
-              type: i === 1 ? 'Intro' : i === 25 ? 'Final follow-up' : 'Follow-up',
-              subject: i === 1 ? 'Quick question' : i === 25 ? 'Closing the loop' : 'Following up',
-              body: `${personalization.greeting}\n\nI am reaching out regarding ${intel.mainBenefit} for ${personalization.safeCompanyMention}.\n\nLet me know if you are open to a quick chat.${bookingLink ? `\n\n${bookingLink}` : ''}${signOff}${i === 25 ? `\n\n${unsubLine}` : ''}`,
-              spamRisk: 'Low',
-              spamIssues: 'None',
-              personalizationReason: 'Fallback generation'
-            });
-          }
+          sequenceData.push({
+            step: 1,
+            delayDays: 0,
+            type: 'Intro / Hook',
+            subject: 'Quick question',
+            body: `${personalization.greeting}\n\nI am reaching out regarding ${intel.mainBenefit} for ${personalization.safeCompanyMention}.\n\nLet me know if you are open to a quick chat.${bookingLink ? `\n\n${bookingLink}` : ''}${signOff}`,
+            spamRisk: 'Low',
+            spamIssues: 'None',
+            personalizationReason: 'Fallback generation'
+          });
         }
 
         // ─── Save email drafts ─────────────────────────────────────────────────
@@ -402,7 +411,9 @@ If the model cannot generate, return: {"emails": []}`;
           const spamHits = spamWords.filter(w => bodyLower.includes(w)).length;
           const calculatedSpamRisk = spamHits >= 3 ? 'High' : spamHits >= 1 ? 'Medium' : 'Low';
           const calculatedSpamIssues = spamHits > 0 ? spamWords.filter(w => bodyLower.includes(w)).join(', ') : 'None';
-          const personalizationScore = lead.aiInsight ? 75 : lead.category ? 60 : 40;
+          
+          let aiScore = parseInt(seq.personalizationScore);
+          const personalizationScore = !isNaN(aiScore) ? aiScore : (lead.aiInsight ? 75 : lead.category ? 60 : 40);
 
           await prisma.emailSequence.create({
             data: {

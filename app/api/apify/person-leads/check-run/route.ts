@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { normalizeLinkedInProfileLead } from '@/lib/person-lead-normalizer';
+import { normalizePersonLead } from '@/lib/person-lead-normalizer';
 import { validatePersonLead } from '@/lib/person-lead-validation';
 import { getApifyRun, getApifyDatasetItems, getApifyRunDatasetItems } from '@/lib/apify/client';
 import { prisma } from '@/lib/prisma';
@@ -23,20 +23,33 @@ export async function GET(req: Request) {
       runStatus = data.status;
       datasetId = data.defaultDatasetId;
     } catch (e: any) {
-      return NextResponse.json({ success: false, error: 'AI Agent search failed.', technicalError: e.message }, { status: 500 });
+      return NextResponse.json({ 
+        success: false, 
+        status: 'FAILED',
+        error: e.message || 'AI Agent search failed.',
+        leads: []
+      }, { status: 500 });
     }
 
     if (['READY', 'RUNNING'].includes(runStatus)) {
       return NextResponse.json({
         success: true,
-        status: 'RUNNING',
-        message: 'AI Agent is searching live candidates...',
+        status: runStatus,
+        rawCount: 0,
+        validCount: 0,
+        needsReviewCount: 0,
+        invalidCount: 0,
         leads: []
       });
     }
 
     if (['FAILED', 'ABORTED', 'TIMED-OUT'].includes(runStatus)) {
-      return NextResponse.json({ success: false, error: 'AI Agent search failed.', technicalError: `Apify run ended with status ${runStatus}` }, { status: 500 });
+      return NextResponse.json({ 
+        success: false, 
+        status: "FAILED",
+        error: `Apify run ended with status ${runStatus}`,
+        leads: []
+      }, { status: 500 });
     }
 
     // Finished! Fetch dataset
@@ -62,107 +75,74 @@ export async function GET(req: Request) {
     }
 
     if (!rawItems || rawItems.length === 0) {
-      return NextResponse.json({ success: true, status: 'SUCCEEDED', rawCount: 0, imported: 0, leads: [] });
+      return NextResponse.json({ 
+        success: true, 
+        status: runStatus || 'SUCCEEDED', 
+        rawCount: 0, 
+        validCount: 0,
+        needsReviewCount: 0,
+        invalidCount: 0,
+        leads: [] 
+      });
     }
 
-    const savedLeads = [];
+    const rawLeadsData = [];
     let validCount = 0;
     let needsReviewCount = 0;
     let invalidCount = 0;
-    let saveErrors = 0;
 
     for (const raw of rawItems) {
-      // Normalize using the specific LinkedIn profile normalizer
-      // Note: we can optionally pass fallbacks from the start request if they were saved, 
-      // but the API is GET and doesn't get them. They're lost unless passed in DB. 
-      // For now we just normalize raw data.
-      const normalized = normalizeLinkedInProfileLead(raw);
-      const validated = validatePersonLead(normalized);
-
-      if (validated.validationStatus === 'Valid') validCount++;
-      else if (validated.validationStatus === 'Needs Review') needsReviewCount++;
-      else invalidCount++;
-
-      // Deduplication check
-      // 1. linkedinUrl 2. email 3. phone 4. fullName + companyName
-      const OR_conditions = [];
-      if (validated.linkedinUrl) OR_conditions.push({ linkedinUrl: validated.linkedinUrl });
-      if (validated.email) OR_conditions.push({ email: validated.email });
-      if (validated.phone) OR_conditions.push({ phone: validated.phone });
-      
-      if (validated.fullName && validated.companyName) {
-        OR_conditions.push({ companyName: validated.companyName, fullName: validated.fullName });
+      let normalized;
+      let validated;
+      try {
+        normalized = normalizePersonLead(raw);
+        validated = validatePersonLead(normalized);
+      } catch (normErr) {
+        console.error("Normalization error:", normErr);
+        continue;
       }
 
+      let classStatus = 'invalid';
+      if (validated.validationStatus === 'valid' || validated.validationStatus === 'Valid') {
+        validCount++;
+        classStatus = 'valid';
+      } else if (validated.validationStatus === 'needs_review' || validated.validationStatus === 'Needs Review') {
+        needsReviewCount++;
+        classStatus = 'needs_review';
+      } else {
+        invalidCount++;
+        classStatus = 'invalid';
+      }
+
+      rawLeadsData.push({
+        userId: user.id,
+        apifyRunId: runId,
+        source: 'Apify',
+        fullName: validated.fullName || `${validated.firstName || ''} ${validated.lastName || ''}`.trim() || null,
+        linkedinUrl: validated.linkedinUrl || null,
+        jobTitle: validated.jobTitle || null,
+        location: validated.location || validated.country || null,
+        email: validated.email || null,
+        phone: validated.phone || null,
+        companyName: validated.businessName || validated.companyName || null,
+        validationStatus: classStatus,
+      });
+    }
+
+    if (rawLeadsData.length > 0) {
       try {
-        let existing = null;
-        if (OR_conditions.length > 0) {
-          existing = await prisma.lead.findFirst({
-            where: {
-              userId: user.id,
-              OR: OR_conditions
-            }
-          });
-        }
-
-        const leadData = {
-          businessName: validated.businessName,
-          firstName: validated.firstName,
-          lastName: validated.lastName,
-          fullName: validated.fullName,
-          jobTitle: validated.jobTitle,
-          linkedinUrl: validated.linkedinUrl,
-          industry: validated.industry,
-          phone: validated.phone,
-          email: validated.email,
-          website: validated.website,
-          country: validated.country,
-          location: validated.location,
-          businessCategory: validated.businessCategory,
-          googleMapsUrl: validated.googleMapsUrl,
-          emailStatus: validated.emailStatus,
-          phoneStatus: validated.phoneStatus,
-          aiFitScore: validated.aiFitScore,
-          aiFitReason: validated.aiFitReason,
-          source: validated.source,
-          sourceUrl: validated.sourceUrl,
-          rawData: validated.rawData as any,
-          status: validated.validationStatus === 'Invalid' ? 'Invalid' : 'New'
-        };
-
-        if (existing) {
-          // Update missing fields
-          const updated = await prisma.lead.update({
-            where: { id: existing.id },
-            data: {
-              ...(!existing.email && { email: leadData.email, emailStatus: leadData.emailStatus }),
-              ...(!existing.phone && { phone: leadData.phone, phoneStatus: leadData.phoneStatus }),
-              ...(!existing.linkedinUrl && { linkedinUrl: leadData.linkedinUrl }),
-              ...(!existing.jobTitle && { jobTitle: leadData.jobTitle }),
-              ...(!existing.firstName && { firstName: leadData.firstName }),
-              ...(!existing.lastName && { lastName: leadData.lastName }),
-              ...(!existing.fullName && { fullName: leadData.fullName }),
-              ...(!existing.aiFitScore && { aiFitScore: leadData.aiFitScore, aiFitReason: leadData.aiFitReason }),
-            }
-          });
-          savedLeads.push(updated);
-        } else {
-          // Create new
-          const created = await prisma.lead.create({
-            data: {
-              ...leadData,
-              userId: user.id,
-            }
-          });
-          savedLeads.push(created);
-        }
+        await prisma.rawLead.createMany({
+          data: rawLeadsData,
+          skipDuplicates: true
+        });
       } catch (err: any) {
-        console.error("Failed to save lead:", err.message);
-        // Still add normalized lead to display on frontend
-        savedLeads.push(validated);
-        saveErrors++;
+        console.error("Bulk insert to RawLead failed:", err.message);
       }
     }
+
+    const savedLeads = await prisma.rawLead.findMany({
+      where: { apifyRunId: runId, userId: user.id }
+    });
     
     const debugData = {
       rawCount: rawItems.length,
@@ -202,23 +182,25 @@ export async function GET(req: Request) {
       }
     }
 
+    console.log("NORMALIZED LEADS:", savedLeads.length);
+
     return NextResponse.json({
       success: true,
-      status: 'SUCCEEDED',
-      ...debugData,
-      imported: savedLeads.length - saveErrors,
-      saved: savedLeads.length - saveErrors,
-      saveErrors,
-      leads: savedLeads,
-      enrichment,
-      ...(saveErrors > 0 && { warning: "Some leads could not be saved, but live results are shown." })
+      status: runStatus || 'SUCCEEDED',
+      rawCount: rawItems.length,
+      validCount,
+      needsReviewCount,
+      invalidCount,
+      leads: savedLeads
     });
 
   } catch (error: any) {
+    console.error("Unhandled error in check-run route:", error);
     return NextResponse.json({ 
       success: false, 
-      error: 'AI Agent search failed.', 
-      technicalError: error.message 
+      status: 'FAILED',
+      error: error.message || 'AI Agent search failed.', 
+      leads: []
     }, { status: 500 });
   }
 }

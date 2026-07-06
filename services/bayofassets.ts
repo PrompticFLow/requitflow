@@ -1,22 +1,22 @@
-export async function generateText(apiKey: string, prompt: string, model: string = 'openai/gpt-4o-mini') {
-  const url = 'https://openrouter.ai/api/v1/chat/completions';
+export async function generateText(apiKey: string, prompt: string, model?: string) {
+  const url = (process.env.BAYOFASSETS_BASE_URL || 'https://api.bayofassets.com') + '/chat/completions';
   
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
-      'X-Title': 'FunnelZen AI',
     },
     body: JSON.stringify({
-      model: model,
+      model: model || process.env.BAYOFASSETS_MODEL || 'default',
       messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+      max_tokens: 2048,
     }),
   });
   
   if (!response.ok) {
-    throw new Error(`OpenRouter generation failed: ${response.statusText}`);
+    throw new Error(`Bay of Assets generation failed: ${response.statusText}`);
   }
   
   const data = await response.json();

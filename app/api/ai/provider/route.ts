@@ -13,8 +13,8 @@ export async function GET() {
     configured = !!process.env.BAYOFASSETS_API_KEY;
   } else if (providerRaw === 'openrouter') {
     provider = 'OpenRouter';
-    model = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
-    configured = !!process.env.OPENROUTER_API_KEY;
+    model = process.env.BAYOFASSETS_MODEL || 'google/gemini-2.5-flash';
+    configured = !!process.env.BAYOFASSETS_API_KEY;
   }
   
   return NextResponse.json({ provider, model, configured });
