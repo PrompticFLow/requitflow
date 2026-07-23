@@ -105,6 +105,7 @@ model Lead {
   aiFitScore       Int?
   businessCategory String?
   emailStatus      String?
+  emailVerifiedAt  DateTime?
   googleMapsUrl    String?
   phoneStatus      String?
   rawData          Json?

@@ -1,7 +1,51 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import Link from 'next/link';
-import { Search, Filter, Download, Plus, Trash2, Loader2, Users, X, ChevronDown } from "lucide-react";
+import { Search, Filter, Download, Plus, Trash2, Loader2, Users, X, ChevronDown, ShieldCheck, ShieldQuestion, MailX } from "lucide-react";
+
+const EMAIL_STATUS_STYLES: Record<string, string> = {
+  Valid: 'bg-green-500/20 text-green-400 border-green-500/30',
+  Verified: 'bg-green-500/20 text-green-400 border-green-500/30',
+  Invalid: 'bg-red-500/20 text-red-400 border-red-500/30',
+  Disposable: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+  Catchall: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+  Unknown: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
+};
+
+function EmailStatusBadge({ status }: { status: string | null }) {
+  if (!status) return null;
+  const style = EMAIL_STATUS_STYLES[status] || 'bg-slate-500/20 text-slate-400 border-slate-500/30';
+  return (
+    <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wide border ${style}`}>
+      {status}
+    </span>
+  );
+}
+
+// NeverBounce verification state — distinct from the deliverability result above.
+function VerificationBadge({ verifiedAt, hasEmail }: { verifiedAt: string | null; hasEmail: boolean }) {
+  if (!hasEmail) {
+    return <span className="text-slate-600 text-xs">—</span>;
+  }
+  if (verifiedAt) {
+    const when = new Date(verifiedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return (
+      <div className="inline-flex flex-col items-start gap-0.5">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 shadow-[0_0_10px_-2px] shadow-emerald-500/40">
+          <ShieldCheck size={11} className="shrink-0" />
+          Verified
+        </span>
+        <span className="text-[9px] text-slate-500 pl-1">NeverBounce · {when}</span>
+      </div>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border border-dashed border-slate-600 bg-slate-800/40 text-slate-400">
+      <ShieldQuestion size={11} className="shrink-0" />
+      Not verified
+    </span>
+  );
+}
 
 export default function LeadDatabasePage() {
   const [leads, setLeads] = useState<any[]>([]);
@@ -13,12 +57,15 @@ export default function LeadDatabasePage() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [deleting, setDeleting] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [removingNoEmail, setRemovingNoEmail] = useState(false);
 
   // New states for campaigns
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
   const [addingToCampaign, setAddingToCampaign] = useState(false);
+  const [onlyVerifiedForCampaign, setOnlyVerifiedForCampaign] = useState(false);
 
   // Manual lead creation
   const [isAddLeadModalOpen, setIsAddLeadModalOpen] = useState(false);
@@ -53,6 +100,8 @@ export default function LeadDatabasePage() {
           status: l.status || "New",
           category: l.category || null,
           country: l.country || null,
+          emailStatus: l.emailStatus || null,
+          emailVerifiedAt: l.emailVerifiedAt || null,
           created: new Date(l.createdAt).toLocaleDateString()
         })));
       }
@@ -151,6 +200,86 @@ export default function LeadDatabasePage() {
     }
   };
 
+  // Verify emails via NeverBounce
+  const handleVerify = async () => {
+    const scope = selectedIds.size > 0 ? filtered.filter(l => selectedIds.has(l.id)) : filtered;
+    const withEmail = scope.filter(l => l.email);
+
+    // Never verify the same email twice — skip anything already run through NeverBounce.
+    const targets = withEmail.filter(l => !l.emailVerifiedAt);
+    const alreadyVerified = withEmail.length - targets.length;
+
+    if (targets.length === 0) {
+      alert(
+        withEmail.length === 0
+          ? 'No leads with an email address to verify.'
+          : 'All selected leads with an email have already been verified.'
+      );
+      return;
+    }
+
+    // Cost is per unique email — identical addresses are only checked once.
+    const uniqueEmails = new Set(targets.map(l => l.email.toLowerCase())).size;
+    const alreadyNote = alreadyVerified > 0 ? `\n${alreadyVerified} already verified (skipped).` : '';
+    if (!confirm(`Verify ${targets.length} ${targets.length === 1 ? 'lead' : 'leads'}?\n\nUses ${uniqueEmails} NeverBounce ${uniqueEmails === 1 ? 'credit' : 'credits'}.${alreadyNote}`)) return;
+
+    setVerifying(true);
+    try {
+      const res = await fetch('/api/leads/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leadIds: targets.map(l => l.id) })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || 'Verification failed.');
+        return;
+      }
+
+      // Patch results in place so the badges update without a refetch.
+      const byId = new Map<string, any>(data.results.map((r: any) => [r.id, r]));
+      setLeads(prev => prev.map(l => (byId.has(l.id)
+        ? { ...l, emailStatus: byId.get(l.id).status, emailVerifiedAt: byId.get(l.id).emailVerifiedAt }
+        : l)));
+
+      const breakdown = Object.entries(data.summary || {})
+        .map(([status, count]) => `${status}: ${count}`)
+        .join('\n');
+      const errorNote = data.errors?.length ? `\n\n${data.errors.length} failed — ${data.errors[0]}` : '';
+      alert(`Verified ${data.verified} ${data.verified === 1 ? 'lead' : 'leads'}\n\n${breakdown}${errorNote}`);
+    } catch {
+      alert('Verification failed. Please try again.');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  // Remove all leads that have no email address
+  const handleRemoveNoEmail = async () => {
+    const noEmail = leads.filter(l => !l.email);
+    if (noEmail.length === 0) {
+      alert('No leads without an email address to remove.');
+      return;
+    }
+    if (!confirm(`⚠️ Permanently delete ${noEmail.length} ${noEmail.length === 1 ? 'lead' : 'leads'} with no email address?\n\nThis cannot be undone.`)) return;
+
+    setRemovingNoEmail(true);
+    try {
+      const ids = noEmail.map(l => l.id);
+      const results = await Promise.allSettled(ids.map(id => fetch(`/api/leads/${id}`, { method: 'DELETE' })));
+      const failed = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok)).length;
+      const deleted = new Set(ids);
+      setLeads(prev => prev.filter(l => !deleted.has(l.id)));
+      setSelectedIds(prev => { const n = new Set(prev); ids.forEach(id => n.delete(id)); return n; });
+      if (failed > 0) alert(`Removed ${ids.length - failed} of ${ids.length}. ${failed} failed — please refresh and retry.`);
+    } catch {
+      alert('Removal failed. Please try again.');
+    } finally {
+      setRemovingNoEmail(false);
+    }
+  };
+
   // Export CSV
   const handleExport = () => {
     const toExport = selectedIds.size > 0 ? filtered.filter(l => selectedIds.has(l.id)) : filtered;
@@ -176,18 +305,26 @@ export default function LeadDatabasePage() {
 
   const handleAddToCampaign = async () => {
     if (!selectedCampaignId) return alert('Please select a campaign.');
-    
+
+    // Optionally restrict to leads NeverBounce has verified.
+    let targetLeads = leads.filter(l => selectedIds.has(l.id));
+    if (onlyVerifiedForCampaign) {
+      targetLeads = targetLeads.filter(l => l.emailVerifiedAt);
+      if (targetLeads.length === 0) {
+        return alert('None of the selected leads are NeverBounce-verified. Verify them first, or turn off the filter.');
+      }
+    }
+
     // Check for missing emails
-    const selectedLeads = leads.filter(l => selectedIds.has(l.id));
-    const missingEmailCount = selectedLeads.filter(l => !l.email).length;
-    
+    const missingEmailCount = targetLeads.filter(l => !l.email).length;
+
     if (missingEmailCount > 0) {
       const proceed = window.confirm(
         `Warning: ${missingEmailCount} of the selected leads do not have email addresses. They can be added, but email sending will be skipped until enrichment is completed.\n\nDo you want to proceed?`
       );
       if (!proceed) return;
     }
-    
+
     setAddingToCampaign(true);
     try {
       const res = await fetch('/api/campaigns/add-leads', {
@@ -195,7 +332,7 @@ export default function LeadDatabasePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           campaignId: selectedCampaignId,
-          leadIds: Array.from(selectedIds)
+          leadIds: targetLeads.map(l => l.id)
         })
       });
       if (res.ok) {
@@ -253,6 +390,7 @@ export default function LeadDatabasePage() {
 
   const allSelected = filtered.length > 0 && selectedIds.size === filtered.length;
   const someSelected = selectedIds.size > 0;
+  const noEmailCount = leads.filter(l => !l.email).length;
 
   return (
     <div className="space-y-6">
@@ -270,6 +408,25 @@ export default function LeadDatabasePage() {
             <Plus size={16} />
             <span>Add Lead</span>
           </button>
+          <button
+            onClick={handleVerify}
+            disabled={verifying}
+            className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-lg transition-colors shadow-lg shadow-emerald-500/25"
+          >
+            {verifying ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
+            <span>{verifying ? 'Verifying…' : 'Verify Leads'}</span>
+          </button>
+          {noEmailCount > 0 && (
+            <button
+              onClick={handleRemoveNoEmail}
+              disabled={removingNoEmail}
+              title="Delete all leads that have no email address"
+              className="flex items-center space-x-2 px-4 py-2 bg-red-600/90 hover:bg-red-500 disabled:opacity-60 text-white rounded-lg transition-colors shadow-lg shadow-red-500/20"
+            >
+              {removingNoEmail ? <Loader2 size={16} className="animate-spin" /> : <MailX size={16} />}
+              <span>{removingNoEmail ? 'Removing…' : `Remove No-Email (${noEmailCount})`}</span>
+            </button>
+          )}
           <button
             onClick={handleExport}
             className="flex items-center space-x-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors"
@@ -296,6 +453,14 @@ export default function LeadDatabasePage() {
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded-md border border-blue-500 flex items-center gap-1 font-medium transition-colors"
             >
               <Plus size={13} /> Add to Campaign
+            </button>
+            <button
+              onClick={handleVerify}
+              disabled={verifying}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-xs rounded-md border border-emerald-500 flex items-center gap-1 font-medium transition-colors"
+            >
+              {verifying ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
+              {verifying ? 'Verifying…' : `Verify ${selectedIds.size}`}
             </button>
             <button
               onClick={handleExport}
@@ -389,6 +554,7 @@ export default function LeadDatabasePage() {
                 </th>
                 <th className="px-6 py-4 font-medium">Business Name</th>
                 <th className="px-6 py-4 font-medium">Email</th>
+                <th className="px-6 py-4 font-medium">Verification</th>
                 <th className="px-6 py-4 font-medium">Contact</th>
                 <th className="px-6 py-4 font-medium">Score / Tier</th>
                 <th className="px-6 py-4 font-medium">Status</th>
@@ -399,14 +565,14 @@ export default function LeadDatabasePage() {
             <tbody className="divide-y divide-slate-800">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-16 text-center text-slate-500">
+                  <td colSpan={9} className="px-6 py-16 text-center text-slate-500">
                     <Loader2 className="animate-spin mx-auto mb-2" size={24} />
                     Loading leads...
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-16 text-center">
+                  <td colSpan={9} className="px-6 py-16 text-center">
                     <div className="flex flex-col items-center justify-center">
                       <div className="w-16 h-16 bg-slate-800/50 text-slate-500 flex items-center justify-center rounded-full mb-4">
                         <Users size={32} />
@@ -451,12 +617,18 @@ export default function LeadDatabasePage() {
                     </td>
                     <td className="px-6 py-4">
                       {lead.email ? (
-                        <a href={`mailto:${lead.email}`} className="text-blue-400 hover:text-blue-300 text-xs font-mono underline underline-offset-2">
-                          {lead.email}
-                        </a>
+                        <div>
+                          <a href={`mailto:${lead.email}`} className="text-blue-400 hover:text-blue-300 text-xs font-mono underline underline-offset-2">
+                            {lead.email}
+                          </a>
+                          <div><EmailStatusBadge status={lead.emailStatus} /></div>
+                        </div>
                       ) : (
                         <span className="text-slate-600 text-xs">Not found</span>
                       )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <VerificationBadge verifiedAt={lead.emailVerifiedAt} hasEmail={!!lead.email} />
                     </td>
                     <td className="px-6 py-4">
                       <div>{lead.phone || '—'}</div>
@@ -531,18 +703,53 @@ export default function LeadDatabasePage() {
               </button>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-slate-300 text-sm">
-                You are adding <span className="font-bold text-white">{selectedIds.size}</span> selected {selectedIds.size === 1 ? 'lead' : 'leads'} to a campaign.
-              </p>
-              {Array.from(selectedIds).filter(id => {
-                const lead = filtered.find(l => l.id === id);
-                return lead && !lead.email;
-              }).length > 0 && (
-                <div className="bg-yellow-500/10 border border-yellow-500/30 p-3 rounded-lg text-yellow-400 text-xs flex gap-2 items-start">
-                  <span className="shrink-0">⚠️</span>
-                  <p>Some leads do not have an email address yet. Enrich contact details before starting email outreach.</p>
-                </div>
-              )}
+              {(() => {
+                const selectedLeads = leads.filter(l => selectedIds.has(l.id));
+                const verifiedCount = selectedLeads.filter(l => l.emailVerifiedAt).length;
+                const effectiveCount = onlyVerifiedForCampaign ? verifiedCount : selectedLeads.length;
+                const missingEmail = selectedLeads.filter(l => !l.email).length;
+                return (
+                  <>
+                    <p className="text-slate-300 text-sm">
+                      You are adding <span className="font-bold text-white">{effectiveCount}</span> {effectiveCount === 1 ? 'lead' : 'leads'} to a campaign
+                      {onlyVerifiedForCampaign && selectedLeads.length !== effectiveCount && (
+                        <span className="text-slate-500"> ({selectedLeads.length - effectiveCount} unverified excluded)</span>
+                      )}.
+                    </p>
+
+                    {/* NeverBounce-verified-only filter */}
+                    <button
+                      type="button"
+                      onClick={() => setOnlyVerifiedForCampaign(v => !v)}
+                      className={`w-full flex items-center justify-between gap-3 p-3 rounded-lg border transition-colors text-left ${
+                        onlyVerifiedForCampaign
+                          ? 'bg-emerald-500/10 border-emerald-500/40'
+                          : 'bg-slate-800/40 border-slate-700 hover:border-slate-600'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <ShieldCheck size={16} className={onlyVerifiedForCampaign ? 'text-emerald-400' : 'text-slate-500'} />
+                        <span className="flex flex-col">
+                          <span className={`text-sm font-medium ${onlyVerifiedForCampaign ? 'text-emerald-300' : 'text-slate-300'}`}>
+                            Only NeverBounce-verified leads
+                          </span>
+                          <span className="text-[11px] text-slate-500">{verifiedCount} of {selectedLeads.length} selected are verified</span>
+                        </span>
+                      </span>
+                      <span className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${onlyVerifiedForCampaign ? 'bg-emerald-500' : 'bg-slate-600'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${onlyVerifiedForCampaign ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      </span>
+                    </button>
+
+                    {missingEmail > 0 && !onlyVerifiedForCampaign && (
+                      <div className="bg-yellow-500/10 border border-yellow-500/30 p-3 rounded-lg text-yellow-400 text-xs flex gap-2 items-start">
+                        <span className="shrink-0">⚠️</span>
+                        <p>Some leads do not have an email address yet. Enrich contact details before starting email outreach.</p>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-1">Select Campaign</label>
                 <select

@@ -756,7 +756,9 @@ export default function AIEmailAgentPage() {
                       {/* Main info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3 mb-1 flex-wrap">
-                          <h3 className="font-bold text-white text-base truncate">{camp.name}</h3>
+                          <Link href={`/dashboard/campaigns/${camp.id}`} className="font-bold text-white text-base truncate hover:text-purple-400 transition-colors" title="Open campaign details">
+                            {camp.name}
+                          </Link>
                           <StatusBadge status={camp.status} />
                           <span className="text-xs text-slate-600 bg-slate-800 px-2 py-0.5 rounded">{camp.campaignType || "Outreach"}</span>
                         </div>
