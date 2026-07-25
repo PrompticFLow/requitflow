@@ -75,7 +75,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       'knowledgeBaseMode', 'selectedKnowledgeBaseFileIds',
       'personalizationLevel', 'personalizationStyle', 'mentionCompanyName',
       'companyFallback', 'useKnowledgeBase', 'emailLength', 'spamSafety', 'ctaStyle',
-      'autoReplyEnabled', 'autoReplyMode'
+      'autoReplyEnabled', 'autoReplyMode', 'gmailAccountId'
     ];
 
     for (const field of editableFields) {

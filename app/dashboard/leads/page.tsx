@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import Link from 'next/link';
-import { Search, Filter, Download, Plus, Trash2, Loader2, Users, X, ChevronDown, ShieldCheck, ShieldQuestion, MailX, Briefcase } from "lucide-react";
+import { Search, Filter, Download, Plus, Trash2, Loader2, Users, X, ChevronDown, ShieldCheck, ShieldQuestion, MailX, Briefcase, Pencil } from "lucide-react";
 
 const EMAIL_STATUS_STYLES: Record<string, string> = {
   Valid: 'bg-green-500/20 text-green-400 border-green-500/30',
@@ -109,14 +109,18 @@ export default function LeadDatabasePage() {
   // Manual lead creation
   const [isAddLeadModalOpen, setIsAddLeadModalOpen] = useState(false);
   const [creatingLead, setCreatingLead] = useState(false);
-  const [newLeadData, setNewLeadData] = useState({
+  const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
+  const emptyLeadForm = {
     businessName: '',
+    fullName: '',
+    jobTitle: '',
     email: '',
     phone: '',
     website: '',
     category: '',
     country: ''
-  });
+  };
+  const [newLeadData, setNewLeadData] = useState(emptyLeadForm);
 
   const fetchLeads = useCallback(async () => {
     setLoading(true);
@@ -131,6 +135,8 @@ export default function LeadDatabasePage() {
         setLeads(data.leads.map((l: any) => ({
           id: l.id,
           name: l.businessName,
+          fullName: l.fullName || null,
+          jobTitle: l.jobTitle || null,
           email: l.email || null,
           phone: l.phone || null,
           website: l.website || null,
@@ -468,21 +474,51 @@ export default function LeadDatabasePage() {
     }
   };
 
-  const handleCreateLead = async (e: React.FormEvent) => {
+  const openAddLeadModal = () => {
+    setEditingLeadId(null);
+    setNewLeadData(emptyLeadForm);
+    setIsAddLeadModalOpen(true);
+  };
+
+  const openEditLeadModal = (lead: any) => {
+    setEditingLeadId(lead.id);
+    setNewLeadData({
+      businessName: lead.name || '',
+      fullName: lead.fullName || '',
+      jobTitle: lead.jobTitle || '',
+      email: lead.email || '',
+      phone: lead.phone || '',
+      website: lead.website || '',
+      category: lead.category || '',
+      country: lead.country || ''
+    });
+    setIsAddLeadModalOpen(true);
+  };
+
+  const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newLeadData.businessName) return alert('Business Name is required.');
     setCreatingLead(true);
     try {
-      const res = await fetch('/api/leads', {
-        method: 'POST',
+      // Derive first/last name from the contact name for email personalization
+      const nameParts = (newLeadData.fullName || '').trim().split(/\s+/).filter(Boolean);
+      const personFields = {
+        fullName: newLeadData.fullName?.trim() || null,
+        firstName: nameParts[0] || null,
+        lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+        jobTitle: newLeadData.jobTitle?.trim() || null,
+      };
+
+      const res = await fetch(editingLeadId ? `/api/leads/${editingLeadId}` : '/api/leads', {
+        method: editingLeadId ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...newLeadData,
-          source: 'Manual',
-          status: 'New'
+          ...personFields,
+          ...(editingLeadId ? {} : { source: 'Manual', status: 'New' })
         })
       });
-      
+
       if (res.status === 401) {
         alert('Your session has expired. Please log in again.');
         window.location.href = '/login';
@@ -491,11 +527,12 @@ export default function LeadDatabasePage() {
 
       if (res.ok) {
         setIsAddLeadModalOpen(false);
-        setNewLeadData({ businessName: '', email: '', phone: '', website: '', category: '', country: '' });
+        setEditingLeadId(null);
+        setNewLeadData(emptyLeadForm);
         fetchLeads(); // refresh the list
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to add lead');
+        alert(err.error || (editingLeadId ? 'Failed to update lead' : 'Failed to add lead'));
       }
     } catch (error) {
       alert('An unexpected error occurred.');
@@ -518,7 +555,7 @@ export default function LeadDatabasePage() {
         </div>
         <div className="flex space-x-3">
           <button
-            onClick={() => setIsAddLeadModalOpen(true)}
+            onClick={openAddLeadModal}
             className="flex items-center space-x-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors shadow-lg shadow-purple-500/25"
           >
             <Plus size={16} />
@@ -767,6 +804,11 @@ export default function LeadDatabasePage() {
                           {lead.name}
                         </Link>
                       </div>
+                      {(lead.fullName || lead.jobTitle) && (
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          {lead.fullName || 'Unknown contact'}{lead.jobTitle ? ` · ${lead.jobTitle}` : ''}
+                        </div>
+                      )}
                       {lead.category && <div className="text-[10px] text-slate-500 mt-0.5">{lead.category}</div>}
                     </td>
                     <td className="px-6 py-4">
@@ -813,17 +855,26 @@ export default function LeadDatabasePage() {
                     </td>
                     <td className="px-6 py-4 text-slate-500">{lead.created}</td>
                     <td className="px-6 py-4 text-right">
-                      <button
-                        onClick={() => handleDelete(lead.id)}
-                        disabled={deleting === lead.id}
-                        className="text-slate-500 hover:text-red-400 disabled:opacity-50 transition-colors p-1 rounded hover:bg-red-500/10"
-                        title="Delete this lead"
-                      >
-                        {deleting === lead.id
-                          ? <Loader2 size={16} className="animate-spin" />
-                          : <Trash2 size={16} />
-                        }
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => openEditLeadModal(lead)}
+                          className="text-slate-500 hover:text-purple-400 transition-colors p-1 rounded hover:bg-purple-500/10"
+                          title="Edit this lead"
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(lead.id)}
+                          disabled={deleting === lead.id}
+                          className="text-slate-500 hover:text-red-400 disabled:opacity-50 transition-colors p-1 rounded hover:bg-red-500/10"
+                          title="Delete this lead"
+                        >
+                          {deleting === lead.id
+                            ? <Loader2 size={16} className="animate-spin" />
+                            : <Trash2 size={16} />
+                          }
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -944,14 +995,14 @@ export default function LeadDatabasePage() {
           <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg overflow-hidden shadow-2xl">
             <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Plus size={18} className="text-purple-400" />
-                Add Lead Manually
+                {editingLeadId ? <Pencil size={18} className="text-purple-400" /> : <Plus size={18} className="text-purple-400" />}
+                {editingLeadId ? 'Edit Lead' : 'Add Lead Manually'}
               </h3>
-              <button onClick={() => setIsAddLeadModalOpen(false)} className="text-slate-400 hover:text-white transition-colors">
+              <button onClick={() => { setIsAddLeadModalOpen(false); setEditingLeadId(null); }} className="text-slate-400 hover:text-white transition-colors">
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={handleCreateLead}>
+            <form onSubmit={handleSaveLead}>
               <div className="p-6 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2">
@@ -966,13 +1017,33 @@ export default function LeadDatabasePage() {
                     />
                   </div>
                   <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Contact Person Name</label>
+                    <input
+                      type="text"
+                      value={newLeadData.fullName}
+                      onChange={e => setNewLeadData({...newLeadData, fullName: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500 transition-colors"
+                      placeholder="e.g. John Doe"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Role / Job Title</label>
+                    <input
+                      type="text"
+                      value={newLeadData.jobTitle}
+                      onChange={e => setNewLeadData({...newLeadData, jobTitle: e.target.value})}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500 transition-colors"
+                      placeholder="e.g. Founder, HR Manager"
+                    />
+                  </div>
+                  <div>
                     <label className="block text-sm font-medium text-slate-400 mb-1">Email</label>
-                    <input 
-                      type="email" 
-                      value={newLeadData.email} 
+                    <input
+                      type="email"
+                      value={newLeadData.email}
                       onChange={e => setNewLeadData({...newLeadData, email: e.target.value})}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500 transition-colors" 
-                      placeholder="e.g. contact@acme.com" 
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500 transition-colors"
+                      placeholder="e.g. contact@acme.com"
                     />
                   </div>
                   <div>
@@ -1020,7 +1091,7 @@ export default function LeadDatabasePage() {
               <div className="p-4 border-t border-slate-800 flex justify-end gap-3 bg-slate-800/20">
                 <button
                   type="button"
-                  onClick={() => setIsAddLeadModalOpen(false)}
+                  onClick={() => { setIsAddLeadModalOpen(false); setEditingLeadId(null); }}
                   className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white transition-colors"
                 >
                   Cancel
@@ -1031,7 +1102,7 @@ export default function LeadDatabasePage() {
                   className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
                 >
                   {creatingLead && <Loader2 size={14} className="animate-spin" />}
-                  Save Lead
+                  {editingLeadId ? 'Update Lead' : 'Save Lead'}
                 </button>
               </div>
             </form>

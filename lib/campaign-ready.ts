@@ -40,55 +40,49 @@ export async function checkCampaignReadyToStart(
 
   const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
 
-  // 1. Sender email / SendGrid check
+  // 1. Sender email check: campaign Gmail account, verified SMTP, or SendGrid
   const hasSendGridKey = !!process.env.SENDGRID_API_KEY;
   const hasSendGridEmail = !!process.env.SENDGRID_FROM_EMAIL;
-  
+
   const smtpAccount = await prisma.smtpAccount.findUnique({ where: { userId } });
   const hasVerifiedSmtp = smtpAccount && smtpAccount.isVerified && smtpAccount.status === 'Active';
 
-  const senderOk = hasVerifiedSmtp || (hasSendGridKey && hasSendGridEmail);
-  
+  let gmailAccount: any = null;
+  if ((campaign as any).gmailAccountId) {
+    gmailAccount = await prisma.gmailAccount.findUnique({ where: { id: (campaign as any).gmailAccountId } });
+  }
+  const hasCampaignGmail = !!(gmailAccount && gmailAccount.status === 'Active');
+
+  const senderOk = hasCampaignGmail || hasVerifiedSmtp || (hasSendGridKey && hasSendGridEmail);
+
   items.push({
     key: 'senderEmail',
     label: 'Sender email connected',
     passed: senderOk,
-    actionHint: 'Connect SMTP or SendGrid before starting this campaign.'
+    actionHint: 'Connect a Gmail account to this campaign (or configure SMTP/SendGrid) before starting.'
   });
-  
+
   if (!senderOk) {
-    missingRequirements.push('Connect SMTP or SendGrid before starting.');
+    missingRequirements.push('Connect a Gmail sending account before starting.');
   }
 
-  // 2. Booking link check
+  // 2. Booking link (optional — emails fall back to a reply-based CTA without one)
   const bookingLink = campaign.bookingLink || campaign.ctaLink || userSettings?.bookingLink;
   const bookingOk = !!(bookingLink && bookingLink.startsWith('http'));
   items.push({
     key: 'bookingLink',
-    label: 'Booking link added',
+    label: 'Booking link added (optional)',
     passed: bookingOk,
-    actionHint: 'Add a booking link to the campaign before starting.'
+    actionHint: 'Optional: add a booking link so emails can link to your calendar.'
   });
-  if (!bookingOk) {
-    missingRequirements.push('Add a booking link to the campaign or your global settings');
-  }
 
-  // 3. Unsubscribe line check
-  const hasUnsubscribeLine = !!(campaign.unsubscribeLine && campaign.unsubscribeLine.trim().length > 0);
-  const hasUnsubscribeInSignature = !!(
-    campaign.emailSignature &&
-    campaign.emailSignature.toLowerCase().includes('unsubscribe')
-  );
-  const unsubscribeOk = hasUnsubscribeLine || hasUnsubscribeInSignature;
+  // 3. Unsubscribe: a tracked unsubscribe link is auto-appended to every send
   items.push({
     key: 'unsubscribeLine',
-    label: 'Unsubscribe line added',
-    passed: unsubscribeOk,
-    actionHint: 'Add an unsubscribe line to the campaign before starting.'
+    label: 'Unsubscribe link (added automatically)',
+    passed: true,
+    actionHint: 'An unsubscribe link is appended to every email automatically.'
   });
-  if (!unsubscribeOk) {
-    missingRequirements.push('Add an unsubscribe line to the campaign email signature');
-  }
 
   // 4. Leads check
   const leadsOk = campaign.campaignLeads.length > 0;
@@ -151,17 +145,21 @@ export async function checkCampaignReadyToStart(
     actionHint: 'Review and approve Email 1 for all leads before starting.'
   });
 
-  // 6. Daily sending limit (from SmtpAccount or Campaign/Settings)
-  const dailyLimitVal = smtpAccount?.dailyLimit || campaign.dailyLimit || userSettings?.dailyEmailLimit || 0;
-  const delaySeconds = smtpAccount?.delayBetweenEmailsSeconds || 120;
-  
-  const dailyLimitOk = dailyLimitVal >= 1 && dailyLimitVal <= 10 && delaySeconds >= 60 && delaySeconds <= 900;
-  
+  // 6. Daily sending limit (Gmail account limit, then SMTP, then campaign/settings)
+  const dailyLimitVal = gmailAccount?.dailyLimit
+    || smtpAccount?.dailyLimit
+    || campaign.dailyLimit
+    || userSettings?.dailyEmailLimit
+    || 0;
+  const delaySeconds = smtpAccount?.delayBetweenEmailsSeconds || campaign.sendDelaySeconds || 120;
+
+  const dailyLimitOk = dailyLimitVal >= 1 && dailyLimitVal <= 500 && delaySeconds >= 30 && delaySeconds <= 3600;
+
   items.push({
     key: 'dailyLimit',
     label: 'Sending limit configured',
     passed: dailyLimitOk,
-    actionHint: 'Configure Sender'
+    actionHint: 'Configure a daily sending limit between 1 and 500 emails.'
   });
   if (!dailyLimitOk) {
     missingRequirements.push('Set sending limit and delay before starting.');

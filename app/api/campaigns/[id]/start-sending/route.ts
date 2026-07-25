@@ -43,15 +43,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       data: { status: 'Active' }
     });
 
-    // We can run process-due-emails logic in the background, or tell the frontend to hit it.
-    // For now, simply mark active. A chron job / background task should hit process-due-emails.
-    // Or we hit the local API asynchronously.
-    
-    // Fire and forget
-    fetch(`${req.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/campaigns/${id}/process-due-emails`, {
-      method: 'POST',
-      headers: { cookie: req.headers.get('cookie') || '' }
-    }).catch(console.error);
+    // Kick off Email 1 sends immediately; follow-ups are handled in the
+    // background by the same processDueEmails pipeline (cron: /api/cron/gmail-sync).
+    const { processDueEmails } = await import('@/lib/email-dispatch');
+    processDueEmails({ userId: user.id }).catch(console.error);
 
     return NextResponse.json({ success: true, campaign });
   } catch (error: any) {

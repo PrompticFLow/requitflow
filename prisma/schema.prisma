@@ -28,6 +28,7 @@ model User {
   companyFilterPresets      CompanyFilterPreset[]
   emailReplies              EmailReply[]
   emailSequences            EmailSequence[]
+  gmailAccounts             GmailAccount[]
   googleCalendarIntegration GoogleCalendarIntegration?
   jobApplications           JobApplication[]
   jobSearchHistory          JobSearchHistory[]
@@ -246,6 +247,8 @@ model Campaign {
   proof                        String?
   targetLocation               String?
   trustReason                  String?
+  gmailAccountId               String?
+  gmailAccount                 GmailAccount?       @relation(fields: [gmailAccountId], references: [id])
   activityLogs                 ActivityLog[]
   bookedCalls                  BookedCall[]
   user                         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -257,6 +260,27 @@ model Campaign {
   leads                        Lead[]
   replies                      Reply[]
   smsSequences                 SmsSequence[]
+}
+
+model GmailAccount {
+  id                    String     @id @default(uuid())
+  userId                String
+  email                 String
+  displayName           String?
+  accessTokenEncrypted  String
+  refreshTokenEncrypted String?
+  tokenExpiry           DateTime?
+  status                String     @default("Active")
+  dailyLimit            Int        @default(50)
+  lastSyncedAt          DateTime?
+  lastError             String?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+  user                  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaigns             Campaign[]
+
+  @@unique([userId, email])
+  @@index([userId])
 }
 
 model CampaignLead {

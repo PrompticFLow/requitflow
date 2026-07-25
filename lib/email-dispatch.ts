@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import sgMail from '@sendgrid/mail';
 import nodemailer from 'nodemailer';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
+import { sendViaGmail, gmailSentTodayCount } from '@/lib/gmail';
 
 export interface SendCampaignEmailOptions {
   to: string;
@@ -59,18 +60,14 @@ export async function sendCampaignEmail({
     return { success: false, error: "Email sequence does not belong to the correct user or campaign." };
   }
 
-  // Campaign checks
-  const bookingLink = campaign.bookingLink || campaign.ctaLink;
-  if (!bookingLink) {
-    return { success: false, error: "Campaign must have a booking link configured before sending." };
-  }
-  
+  // An unsubscribe link is auto-appended to every tracked send (see below),
+  // so a manual unsubscribe line is only required for untracked sends.
   const hasUnsubscribeLine = !!(campaign.unsubscribeLine && campaign.unsubscribeLine.trim().length > 0);
   const hasUnsubscribeInSignature = !!(
     campaign.emailSignature &&
     campaign.emailSignature.toLowerCase().includes('unsubscribe')
   );
-  if (!hasUnsubscribeLine && !hasUnsubscribeInSignature) {
+  if (!sendLogId && !hasUnsubscribeLine && !hasUnsubscribeInSignature) {
     return { success: false, error: "Campaign must have an unsubscribe line configured before sending." };
   }
 
@@ -90,14 +87,12 @@ export async function sendCampaignEmail({
   }
 
   let finalHtml = html;
+  let unsubscribeUrl: string | null = null;
   if (sendLogId) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    
-    // 1. Inject open tracking pixel
-    const pixelUrl = `${appUrl}/api/tracking/open/${sendLogId}`;
-    finalHtml += `<img src="${pixelUrl}" width="1" height="1" style="display:none;" alt="" />`;
-    
-    // 2. Rewrite links for click tracking
+
+    // 1. Rewrite links for click tracking (before appending the unsubscribe link,
+    //    which must stay untracked so it always works)
     finalHtml = finalHtml.replace(/<a([^>]+)href=["']([^"']+)["']([^>]*)>/gi, (match, before, url, after) => {
       // Skip non-web links
       if (url.startsWith('mailto:') || url.startsWith('tel:') || url.startsWith('#')) {
@@ -106,6 +101,14 @@ export async function sendCampaignEmail({
       const trackingUrl = `${appUrl}/api/tracking/click?url=${encodeURIComponent(url)}&sendLogId=${sendLogId}`;
       return `<a${before}href="${trackingUrl}"${after}>`;
     });
+
+    // 2. Append unsubscribe footer
+    unsubscribeUrl = `${appUrl}/api/unsubscribe/${sendLogId}`;
+    finalHtml += `<br/><br/><p style="font-size:12px;color:#94a3b8;">Don't want these emails? <a href="${unsubscribeUrl}" style="color:#94a3b8;">Unsubscribe</a></p>`;
+
+    // 3. Inject open tracking pixel
+    const pixelUrl = `${appUrl}/api/tracking/open/${sendLogId}`;
+    finalHtml += `<img src="${pixelUrl}" width="1" height="1" style="display:none;" alt="" />`;
   }
 
   // Lead checks
@@ -119,6 +122,45 @@ export async function sendCampaignEmail({
   const safetyCheck = await canSendEmail(user.id, lead.id, campaign.id);
   if (!safetyCheck.canSend) {
     return { success: false, error: safetyCheck.reason };
+  }
+
+  // Priority 0: Campaign's connected Gmail account (client's own inbox)
+  const gmailAccountId = (campaign as any).gmailAccountId as string | null;
+  if (gmailAccountId) {
+    const gmailAccount = await prisma.gmailAccount.findUnique({ where: { id: gmailAccountId } });
+    if (gmailAccount && gmailAccount.status === 'Active') {
+      try {
+        const sentToday = await gmailSentTodayCount(gmailAccount.id);
+        if (sentToday >= gmailAccount.dailyLimit) {
+          return { success: false, error: `Daily sending limit reached for ${gmailAccount.email} (${gmailAccount.dailyLimit}/day). Emails will resume tomorrow.` };
+        }
+
+        const headers: Record<string, string> = {};
+        if (unsubscribeUrl) {
+          headers['List-Unsubscribe'] = `<${unsubscribeUrl}>`;
+          headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
+        }
+
+        const info = await sendViaGmail(gmailAccount.id, {
+          to,
+          subject,
+          html: finalHtml,
+          text: text || html.replace(/<[^>]+>/g, ''),
+          fromName: campaign.senderName || gmailAccount.displayName || user.name || undefined,
+          replyTo: gmailAccount.email,
+          headers,
+        });
+
+        return { success: true, messageId: info.messageId };
+      } catch (error: any) {
+        console.error('Gmail send error:', error?.message);
+        await prisma.gmailAccount.update({
+          where: { id: gmailAccount.id },
+          data: { lastError: error?.message?.slice(0, 500) || 'Send failed' },
+        }).catch(() => {});
+        return { success: false, error: 'Gmail sending failed. Try reconnecting the Gmail account for this campaign.' };
+      }
+    }
   }
 
   // Check if User has their own verified SMTP
@@ -137,7 +179,7 @@ export async function sendCampaignEmail({
   if (!hasVerifiedSmtp && !hasSendGrid) {
     return {
       success: false,
-      error: "Connect SMTP or SendGrid before starting this campaign."
+      error: "Connect a Gmail account to this campaign (or configure SMTP/SendGrid) before sending."
     };
   }
 
@@ -226,31 +268,49 @@ export interface ProcessDueEmailsOptions {
 
 export async function processDueEmails({ userId, limit }: ProcessDueEmailsOptions = {}) {
   const now = new Date();
-  
-  // Build query where clause
+
+  // Candidates: approved emails in Active campaigns that haven't been sent yet.
+  // Dueness is decided per-email below (scheduledAt, or delay after previous step),
+  // so this fully drives sequences in the background — no app session needed.
   const whereClause: any = {
-    status: 'Queued',
+    status: { in: ['Queued', 'Scheduled', 'Draft'] },
     approvalStatus: 'Approved',
-    scheduledAt: { lte: now },
+    sentAt: null,
     campaign: { status: 'Active' }
   };
-  
+
   if (userId) {
     whereClause.userId = userId;
   }
-  
+
   const dueEmails = await prisma.emailSequence.findMany({
     where: whereClause,
-    take: limit || 25,
+    take: Math.max((limit || 25) * 4, 100),
     include: {
       campaign: true,
       user: true,
       lead: true
     },
-    orderBy: {
-      scheduledAt: 'asc'
-    }
+    orderBy: [
+      { sequenceStep: 'asc' },
+      { createdAt: 'asc' }
+    ]
   });
+
+  // Per-user daily send caps: the campaign's Gmail account limit when connected,
+  // otherwise the legacy conservative default.
+  const gmailLimitCache: Record<string, number> = {};
+  const resolveDailyCap = async (campaign: any): Promise<number> => {
+    const gmailAccountId = campaign.gmailAccountId as string | null;
+    if (gmailAccountId) {
+      if (gmailLimitCache[gmailAccountId] === undefined) {
+        const account = await prisma.gmailAccount.findUnique({ where: { id: gmailAccountId } });
+        gmailLimitCache[gmailAccountId] = account?.dailyLimit || 50;
+      }
+      return gmailLimitCache[gmailAccountId];
+    }
+    return campaign.dailyLimit || 10;
+  };
 
   let processedCount = 0;
   let sentCount = 0;
@@ -260,7 +320,25 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
   for (const email of dueEmails) {
     try {
       const { campaign, user, lead } = email;
-      
+
+      // 0. Dueness check
+      if (email.sequenceStep > 1) {
+        // Follow-up: never due before the previous step was sent, regardless
+        // of any scheduledAt stamp — and only after the delay has elapsed.
+        const prevStep = await prisma.emailSequence.findFirst({
+          where: { campaignId: campaign.id, leadId: lead.id, sequenceStep: email.sequenceStep - 1 }
+        });
+        if (!prevStep || prevStep.status !== 'Sent' || !prevStep.sentAt) continue;
+
+        // delayAmount is cumulative days-from-start; derive the gap from the previous step
+        const gapDays = Math.max(1, (email.delayAmount || 1) - (prevStep.delayAmount || 0));
+        const daysSincePrev = (now.getTime() - prevStep.sentAt.getTime()) / (1000 * 3600 * 24);
+        if (daysSincePrev < gapDays) continue;
+      } else if (email.scheduledAt && email.scheduledAt > now) {
+        continue;
+      }
+      // Step 1 without scheduledAt is due immediately.
+
       // 1. Check Unsubscribed
       const isUnsub = await prisma.unsubscribeList.findUnique({
         where: { userId_email: { userId: user.id, email: lead.email || '' } }
@@ -300,8 +378,10 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
 
       // 3. Check Limits
       if (!userSendCounts[user.id]) userSendCounts[user.id] = 0;
-      if (userSendCounts[user.id] >= 10) continue; // Max 10 per user run/day
+      const dailyCap = await resolveDailyCap(campaign);
+      if (userSendCounts[user.id] >= dailyCap) continue;
       if (campaign.dailyLimit && userSendCounts[user.id] >= campaign.dailyLimit) continue;
+      if (sentCount >= (limit || 25)) break;
       
       // Ensure delay is respected (check last sent email time for this campaign)
       if (campaign.sendDelaySeconds) {
@@ -320,7 +400,7 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
       const freshSeq = await prisma.emailSequence.findUnique({
         where: { id: email.id }
       });
-      if (!freshSeq || freshSeq.status !== 'Queued' || freshSeq.sentAt !== null) {
+      if (!freshSeq || !['Queued', 'Scheduled', 'Draft'].includes(freshSeq.status) || freshSeq.sentAt !== null) {
         continue;
       }
 
@@ -340,7 +420,7 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
       const result = await sendCampaignEmail({
         to: lead.email || '',
         subject: email.subject,
-        html: email.body, // plain text or HTML body
+        html: /<[a-z][\s\S]*>/i.test(email.body) ? email.body : email.body.replace(/\n/g, '<br/>'),
         campaignId: campaign.id,
         leadId: lead.id,
         emailSequenceId: email.id,
@@ -367,14 +447,31 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
           }
         });
 
+        // Stamp the next step's send time so the UI can show "Sends in N days"
+        const nextStep = await prisma.emailSequence.findFirst({
+          where: { campaignId: campaign.id, leadId: lead.id, sequenceStep: email.sequenceStep + 1 }
+        });
+        if (nextStep && !nextStep.sentAt && nextStep.status !== 'Cancelled') {
+          const gapDays = Math.max(1, (nextStep.delayAmount || 1) - (email.delayAmount || 0));
+          const nextTime = new Date();
+          nextTime.setDate(nextTime.getDate() + gapDays);
+          await prisma.emailSequence.update({
+            where: { id: nextStep.id },
+            data: { status: nextStep.approvalStatus === 'Approved' ? 'Scheduled' : nextStep.status, scheduledAt: nextTime }
+          });
+        }
+
         sentCount++;
         userSendCounts[user.id]++;
       } else {
-        // Failed
+        // Rate limits are temporary — keep the email Queued so the next
+        // scheduler tick retries it, instead of marking it dead.
+        const isTemporary = /limit .*reached|limit reached|try again later/i.test(result.error || '');
+
         await prisma.emailSequence.update({
           where: { id: email.id },
           data: {
-            status: 'Failed',
+            status: isTemporary ? 'Queued' : 'Failed',
             errorMessage: result.error || 'Send failed'
           }
         });
@@ -388,7 +485,7 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
           }
         });
 
-        failedCount++;
+        if (!isTemporary) failedCount++;
       }
 
     } catch (err: any) {
