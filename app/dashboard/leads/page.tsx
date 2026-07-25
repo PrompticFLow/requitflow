@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import Link from 'next/link';
-import { Search, Filter, Download, Plus, Trash2, Loader2, Users, X, ChevronDown, ShieldCheck, ShieldQuestion, MailX } from "lucide-react";
+import { Search, Filter, Download, Plus, Trash2, Loader2, Users, X, ChevronDown, ShieldCheck, ShieldQuestion, MailX, Briefcase } from "lucide-react";
 
 const EMAIL_STATUS_STYLES: Record<string, string> = {
   Valid: 'bg-green-500/20 text-green-400 border-green-500/30',
@@ -12,28 +12,19 @@ const EMAIL_STATUS_STYLES: Record<string, string> = {
   Unknown: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
 };
 
-function EmailStatusBadge({ status }: { status: string | null }) {
-  if (!status) return null;
-  const style = EMAIL_STATUS_STYLES[status] || 'bg-slate-500/20 text-slate-400 border-slate-500/30';
-  return (
-    <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wide border ${style}`}>
-      {status}
-    </span>
-  );
-}
-
-// NeverBounce verification state — distinct from the deliverability result above.
-function VerificationBadge({ verifiedAt, hasEmail }: { verifiedAt: string | null; hasEmail: boolean }) {
+// NeverBounce verification — shows the deliverability result (Valid/Catchall/Unknown/…) once checked.
+function VerificationBadge({ verifiedAt, status, hasEmail }: { verifiedAt: string | null; status: string | null; hasEmail: boolean }) {
   if (!hasEmail) {
     return <span className="text-slate-600 text-xs">—</span>;
   }
   if (verifiedAt) {
     const when = new Date(verifiedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const style = (status && EMAIL_STATUS_STYLES[status]) || 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40';
     return (
       <div className="inline-flex flex-col items-start gap-0.5">
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 shadow-[0_0_10px_-2px] shadow-emerald-500/40">
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border ${style}`}>
           <ShieldCheck size={11} className="shrink-0" />
-          Verified
+          {status || 'Verified'}
         </span>
         <span className="text-[9px] text-slate-500 pl-1">NeverBounce · {when}</span>
       </div>
@@ -47,6 +38,51 @@ function VerificationBadge({ verifiedAt, hasEmail }: { verifiedAt: string | null
   );
 }
 
+const HIRING_STATUS_STYLES: Record<string, string> = {
+  'Hiring': 'bg-green-500/20 text-green-400 border-green-500/30',
+  'Not Hiring': 'bg-red-500/20 text-red-400 border-red-500/30',
+  'Unknown': 'bg-slate-500/20 text-slate-400 border-slate-500/30',
+};
+
+// Perplexity (via OpenRouter) hiring research — careers pages, LinkedIn Jobs, job boards.
+function HiringBadge({ lead }: { lead: any }) {
+  if (!lead.hiringCheckedAt) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border border-dashed border-slate-600 bg-slate-800/40 text-slate-400">
+        <Briefcase size={11} className="shrink-0" />
+        Not checked
+      </span>
+    );
+  }
+  const when = new Date(lead.hiringCheckedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const style = HIRING_STATUS_STYLES[lead.hiringStatus] || HIRING_STATUS_STYLES['Unknown'];
+  const label = lead.hiringStatus === 'Hiring' && lead.hiringJobCount
+    ? `Hiring · ${lead.hiringJobCount} ${lead.hiringJobCount === 1 ? 'job' : 'jobs'}`
+    : (lead.hiringStatus || 'Unknown');
+  return (
+    <div className="inline-flex flex-col items-start gap-0.5 max-w-[180px]">
+      <span
+        title={lead.hiringSignal || undefined}
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border ${style}`}
+      >
+        <Briefcase size={11} className="shrink-0" />
+        {label}
+      </span>
+      {lead.hiringSignal && (
+        <span className="text-[9px] text-slate-500 pl-1 line-clamp-2" title={lead.hiringSignal}>{lead.hiringSignal}</span>
+      )}
+      <span className="text-[9px] text-slate-500 pl-1">
+        {lead.hiringSourceUrl ? (
+          <a href={lead.hiringSourceUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400/80 hover:text-blue-300 underline underline-offset-2">
+            Source
+          </a>
+        ) : null}
+        {lead.hiringSourceUrl ? ' · ' : ''}Perplexity · {when}
+      </span>
+    </div>
+  );
+}
+
 export default function LeadDatabasePage() {
   const [leads, setLeads] = useState<any[]>([]);
   const [filtered, setFiltered] = useState<any[]>([]);
@@ -55,9 +91,12 @@ export default function LeadDatabasePage() {
   const [search, setSearch] = useState('');
   const [tierFilter, setTierFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [hiringFilter, setHiringFilter] = useState('All');
   const [deleting, setDeleting] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [checkingHiring, setCheckingHiring] = useState(false);
+  const [hiringProgress, setHiringProgress] = useState<{ done: number; total: number } | null>(null);
   const [removingNoEmail, setRemovingNoEmail] = useState(false);
 
   // New states for campaigns
@@ -102,6 +141,11 @@ export default function LeadDatabasePage() {
           country: l.country || null,
           emailStatus: l.emailStatus || null,
           emailVerifiedAt: l.emailVerifiedAt || null,
+          hiringStatus: l.hiringStatus || null,
+          hiringSignal: l.hiringSignal || null,
+          hiringSourceUrl: l.hiringSourceUrl || null,
+          hiringJobCount: l.hiringJobCount ?? null,
+          hiringCheckedAt: l.hiringCheckedAt || null,
           created: new Date(l.createdAt).toLocaleDateString()
         })));
       }
@@ -144,8 +188,15 @@ export default function LeadDatabasePage() {
     }
     if (tierFilter !== 'All') result = result.filter(l => l.tier === tierFilter);
     if (statusFilter !== 'All') result = result.filter(l => l.status === statusFilter);
+    if (hiringFilter !== 'All') {
+      if (hiringFilter === 'Not Checked') {
+        result = result.filter(l => !l.hiringCheckedAt);
+      } else {
+        result = result.filter(l => l.hiringCheckedAt && (l.hiringStatus || 'Unknown') === hiringFilter);
+      }
+    }
     setFiltered(result);
-  }, [leads, search, tierFilter, statusFilter]);
+  }, [leads, search, tierFilter, statusFilter, hiringFilter]);
 
   // Selection
   const toggleSelect = (id: string) => {
@@ -255,6 +306,71 @@ export default function LeadDatabasePage() {
     }
   };
 
+  // Research hiring status via Perplexity (OpenRouter) — careers page, LinkedIn, job boards.
+  const handleCheckHiring = async () => {
+    const scope = selectedIds.size > 0 ? filtered.filter(l => selectedIds.has(l.id)) : filtered;
+    if (scope.length === 0) {
+      alert('No leads to check.');
+      return;
+    }
+
+    let targets = scope.filter(l => !l.hiringCheckedAt);
+    let force = false;
+    const alreadyChecked = scope.length - targets.length;
+
+    if (targets.length === 0) {
+      // Everything in scope was checked before — offer a fresh re-check since hiring goes stale.
+      if (!confirm(`All ${scope.length} selected ${scope.length === 1 ? 'lead has' : 'leads have'} already been checked.\n\nRe-check them for fresh hiring data?`)) return;
+      targets = scope;
+      force = true;
+    } else {
+      const alreadyNote = alreadyChecked > 0 ? `\n${alreadyChecked} already checked (skipped).` : '';
+      if (!confirm(`Research hiring status for ${targets.length} ${targets.length === 1 ? 'lead' : 'leads'}?\n\nUses Perplexity web search (one lookup per lead) to scan careers pages, LinkedIn and job boards.${alreadyNote}`)) return;
+    }
+
+    setCheckingHiring(true);
+    setHiringProgress({ done: 0, total: targets.length });
+
+    const BATCH = 10;
+    let checked = 0;
+    const summary: Record<string, number> = {};
+    const errors: string[] = [];
+
+    try {
+      for (let i = 0; i < targets.length; i += BATCH) {
+        const batch = targets.slice(i, i + BATCH);
+        const res = await fetch('/api/leads/check-hiring', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ leadIds: batch.map(l => l.id), force })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          errors.push(data.error || 'Request failed.');
+        } else {
+          checked += data.checked || 0;
+          Object.entries(data.summary || {}).forEach(([k, v]) => { summary[k] = (summary[k] || 0) + (v as number); });
+          if (data.errors?.length) errors.push(...data.errors);
+
+          // Patch results in place so badges update while later batches run.
+          const byId = new Map<string, any>((data.results || []).map((r: any) => [r.id, r]));
+          setLeads(prev => prev.map(l => (byId.has(l.id) ? { ...l, ...byId.get(l.id) } : l)));
+        }
+        setHiringProgress({ done: Math.min(i + batch.length, targets.length), total: targets.length });
+      }
+
+      const breakdown = Object.entries(summary).map(([status, count]) => `${status}: ${count}`).join('\n');
+      const errorNote = errors.length ? `\n\n${errors.length} failed — ${errors[0]}` : '';
+      alert(`Checked hiring status for ${checked} ${checked === 1 ? 'lead' : 'leads'}\n\n${breakdown || 'No results.'}${errorNote}`);
+    } catch {
+      alert('Hiring check failed. Please try again.');
+    } finally {
+      setCheckingHiring(false);
+      setHiringProgress(null);
+    }
+  };
+
   // Remove all leads that have no email address
   const handleRemoveNoEmail = async () => {
     const noEmail = leads.filter(l => !l.email);
@@ -284,9 +400,9 @@ export default function LeadDatabasePage() {
   const handleExport = () => {
     const toExport = selectedIds.size > 0 ? filtered.filter(l => selectedIds.has(l.id)) : filtered;
     if (toExport.length === 0) return;
-    const headers = "Business Name,Email,Phone,Website,Category,Score,Tier,Status,Country,Date Added\n";
+    const headers = "Business Name,Email,Phone,Website,Category,Score,Tier,Status,Hiring,Hiring Jobs,Hiring Evidence,Hiring Source,Country,Date Added\n";
     const rows = toExport.map(l =>
-      `"${(l.name || '').replace(/"/g, '""')}","${l.email || ''}","${l.phone || ''}","${l.website || ''}","${l.category || ''}","${l.score}","${l.tier}","${l.status}","${l.country || ''}","${l.created}"`
+      `"${(l.name || '').replace(/"/g, '""')}","${l.email || ''}","${l.phone || ''}","${l.website || ''}","${l.category || ''}","${l.score}","${l.tier}","${l.status}","${l.hiringCheckedAt ? (l.hiringStatus || 'Unknown') : 'Not Checked'}","${l.hiringJobCount ?? ''}","${(l.hiringSignal || '').replace(/"/g, '""')}","${l.hiringSourceUrl || ''}","${l.country || ''}","${l.created}"`
     ).join("\n");
     const blob = new Blob([headers + rows], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -416,6 +532,19 @@ export default function LeadDatabasePage() {
             {verifying ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
             <span>{verifying ? 'Verifying…' : 'Verify Leads'}</span>
           </button>
+          <button
+            onClick={handleCheckHiring}
+            disabled={checkingHiring}
+            title="Research each lead's hiring status (careers page, LinkedIn, job boards) via Perplexity"
+            className="flex items-center space-x-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 text-white rounded-lg transition-colors shadow-lg shadow-cyan-500/25"
+          >
+            {checkingHiring ? <Loader2 size={16} className="animate-spin" /> : <Briefcase size={16} />}
+            <span>
+              {checkingHiring
+                ? `Checking${hiringProgress ? ` ${hiringProgress.done}/${hiringProgress.total}` : '…'}`
+                : 'Check Hiring'}
+            </span>
+          </button>
           {noEmailCount > 0 && (
             <button
               onClick={handleRemoveNoEmail}
@@ -461,6 +590,16 @@ export default function LeadDatabasePage() {
             >
               {verifying ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
               {verifying ? 'Verifying…' : `Verify ${selectedIds.size}`}
+            </button>
+            <button
+              onClick={handleCheckHiring}
+              disabled={checkingHiring}
+              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 text-white text-xs rounded-md border border-cyan-500 flex items-center gap-1 font-medium transition-colors"
+            >
+              {checkingHiring ? <Loader2 size={13} className="animate-spin" /> : <Briefcase size={13} />}
+              {checkingHiring
+                ? `Checking${hiringProgress ? ` ${hiringProgress.done}/${hiringProgress.total}` : '…'}`
+                : `Check Hiring ${selectedIds.size}`}
             </button>
             <button
               onClick={handleExport}
@@ -536,6 +675,20 @@ export default function LeadDatabasePage() {
               </select>
               <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
             </div>
+            <div className="relative">
+              <select
+                value={hiringFilter}
+                onChange={e => setHiringFilter(e.target.value)}
+                className="appearance-none bg-slate-900 border border-slate-700 text-slate-300 rounded-lg px-3 py-2 pr-8 text-sm focus:outline-none focus:border-purple-500"
+              >
+                <option value="All">All Hiring</option>
+                <option value="Hiring">💼 Hiring</option>
+                <option value="Not Hiring">Not Hiring</option>
+                <option value="Unknown">Unknown</option>
+                <option value="Not Checked">Not Checked</option>
+              </select>
+              <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+            </div>
             <span className="text-slate-500 text-sm self-center pl-2">{filtered.length} leads</span>
           </div>
         </div>
@@ -555,6 +708,7 @@ export default function LeadDatabasePage() {
                 <th className="px-6 py-4 font-medium">Business Name</th>
                 <th className="px-6 py-4 font-medium">Email</th>
                 <th className="px-6 py-4 font-medium">Verification</th>
+                <th className="px-6 py-4 font-medium">Hiring</th>
                 <th className="px-6 py-4 font-medium">Contact</th>
                 <th className="px-6 py-4 font-medium">Score / Tier</th>
                 <th className="px-6 py-4 font-medium">Status</th>
@@ -565,14 +719,14 @@ export default function LeadDatabasePage() {
             <tbody className="divide-y divide-slate-800">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-16 text-center text-slate-500">
+                  <td colSpan={10} className="px-6 py-16 text-center text-slate-500">
                     <Loader2 className="animate-spin mx-auto mb-2" size={24} />
                     Loading leads...
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-16 text-center">
+                  <td colSpan={10} className="px-6 py-16 text-center">
                     <div className="flex flex-col items-center justify-center">
                       <div className="w-16 h-16 bg-slate-800/50 text-slate-500 flex items-center justify-center rounded-full mb-4">
                         <Users size={32} />
@@ -587,7 +741,7 @@ export default function LeadDatabasePage() {
                       </p>
                       {leads.length > 0 && (
                         <button
-                          onClick={() => { setSearch(''); setTierFilter('All'); setStatusFilter('All'); }}
+                          onClick={() => { setSearch(''); setTierFilter('All'); setStatusFilter('All'); setHiringFilter('All'); }}
                           className="mt-4 text-sm text-purple-400 hover:text-purple-300"
                         >
                           Clear filters
@@ -617,18 +771,18 @@ export default function LeadDatabasePage() {
                     </td>
                     <td className="px-6 py-4">
                       {lead.email ? (
-                        <div>
-                          <a href={`mailto:${lead.email}`} className="text-blue-400 hover:text-blue-300 text-xs font-mono underline underline-offset-2">
-                            {lead.email}
-                          </a>
-                          <div><EmailStatusBadge status={lead.emailStatus} /></div>
-                        </div>
+                        <a href={`mailto:${lead.email}`} className="text-blue-400 hover:text-blue-300 text-xs font-mono underline underline-offset-2">
+                          {lead.email}
+                        </a>
                       ) : (
                         <span className="text-slate-600 text-xs">Not found</span>
                       )}
                     </td>
                     <td className="px-6 py-4">
-                      <VerificationBadge verifiedAt={lead.emailVerifiedAt} hasEmail={!!lead.email} />
+                      <VerificationBadge verifiedAt={lead.emailVerifiedAt} status={lead.emailStatus} hasEmail={!!lead.email} />
+                    </td>
+                    <td className="px-6 py-4">
+                      <HiringBadge lead={lead} />
                     </td>
                     <td className="px-6 py-4">
                       <div>{lead.phone || '—'}</div>

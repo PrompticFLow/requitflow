@@ -94,6 +94,7 @@ export async function POST(req: Request) {
         senderEmail: data.senderEmail,
         dailyLimit: parseInt(String(data.dailyLimit)) || 50,
         followUpCount: parseInt(String(data.followUpCount)) || 5,
+        emailSequenceCount: parseInt(String(data.emailSequenceCount)) || 4,
         personalizationLevel: data.personalizationLevel,
         personalizationStyle: data.personalizationStyle,
         mentionCompanyName: data.mentionCompanyName ?? true,

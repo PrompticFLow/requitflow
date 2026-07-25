@@ -66,7 +66,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       'problemSolved', 'mainBenefit', 'uniqueMechanism', 'proofCaseStudy', 
       'painPoints', 'desiredOutcome', 'objections', 'avoidSaying',
       'unsubscribeLine', 'senderEmail',
-      'dailyLimit', 'followUpCount',
+      'dailyLimit', 'followUpCount', 'emailSequenceCount',
       'timingMode', 'timezoneMode', 'allowedSendingDays', 'sendingWindowStart',
       'sendingWindowEnd', 'weekendsEnabled', 'skipHolidays', 'autoApproveEmails',
       'autoSendApprovedEmails', 'bookingAutomationMode', 'meetingType',
@@ -82,6 +82,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       if (data[field] !== undefined) {
         updateData[field] = data[field];
       }
+    }
+
+    if (updateData.emailSequenceCount !== undefined) {
+      updateData.emailSequenceCount = parseInt(String(updateData.emailSequenceCount)) || 4;
     }
 
     // Block status=Active from going through PATCH — use /start endpoint instead
