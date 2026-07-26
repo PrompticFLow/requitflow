@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { Search, Filter, Loader2, MessageSquare, Reply as ReplyIcon, CheckCircle2, XCircle, AlertCircle, Calendar, RefreshCw } from "lucide-react";
+import { extractLatestReplyText } from "@/lib/email/strip-quoted-reply";
 
 export default function RepliesPage() {
   const [loading, setLoading] = useState(true);
@@ -231,7 +232,7 @@ export default function RepliesPage() {
                 </div>
 
                 <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mb-4">
-                  <p className="text-sm text-slate-300 whitespace-pre-wrap">{reply.emailBody}</p>
+                  <p className="text-sm text-slate-300 whitespace-pre-wrap">{extractLatestReplyText(reply.emailBody || '')}</p>
                 </div>
 
                 {reply.aiSuggestedReply && (

@@ -56,7 +56,9 @@ export async function register() {
     }
   };
 
-  // First tick shortly after boot, then on the interval
-  setTimeout(tick, 30_000);
+  // First tick shortly after boot (faster in dev so reply testing isn't blocked),
+  // then on the configured interval.
+  const firstDelayMs = process.env.NODE_ENV === 'development' ? 5_000 : 30_000;
+  setTimeout(tick, firstDelayMs);
   setInterval(tick, intervalMinutes * 60_000);
 }

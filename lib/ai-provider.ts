@@ -2,6 +2,45 @@ export async function generateAiResponse(prompt: string): Promise<any> {
   const providerRaw = (process.env.AI_PROVIDER || '').trim().toLowerCase();
   let provider = 'bayofassets';
   if (providerRaw === 'google') provider = 'google';
+  // Default to OpenRouter whenever its key is configured (unless explicitly overridden)
+  if (providerRaw === 'openrouter' || (!providerRaw && process.env.OPENROUTER_API_KEY)) provider = 'openrouter';
+
+  if (provider === 'openrouter') {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      throw new Error('OPENROUTER_API_KEY is not configured.');
+    }
+
+    const model = process.env.OPENROUTER_MODEL || process.env.OPENROUTER_EMAIL_MODEL || 'openai/gpt-4o-mini';
+
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://funnelzen.ai',
+        'X-Title': 'FunnelZen AI',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 2048,
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      throw new Error(`OpenRouter AI provider failed: ${data.error?.message || JSON.stringify(data)}`);
+    }
+
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error('OpenRouter returned an empty response. Please try again.');
+    }
+
+    return content;
+  }
 
   if (provider === 'google') {
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_API_KEY;

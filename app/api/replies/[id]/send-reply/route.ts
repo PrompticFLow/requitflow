@@ -4,6 +4,8 @@ import { getCurrentUser } from '@/lib/auth';
 import nodemailer from 'nodemailer';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
 import sgMail from '@sendgrid/mail';
+import { sendViaGmail, resolveGmailReplyThreading } from '@/lib/gmail';
+import { buildReplySubject } from '@/lib/email/reply-subject';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -31,7 +33,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: 'Reply, Lead, or Campaign not found.' }, { status: 404 });
     }
 
-    // Check SMTP config
+    // Check sending methods: campaign Gmail first, then SMTP, then SendGrid
+    let gmailAccount = null;
+    if ((reply.campaign as any).gmailAccountId) {
+      gmailAccount = await prisma.gmailAccount.findUnique({
+        where: { id: (reply.campaign as any).gmailAccountId }
+      });
+      if (gmailAccount && gmailAccount.status !== 'Active') gmailAccount = null;
+    }
+
     const smtpAccount = await prisma.smtpAccount.findUnique({
       where: { userId: user.id }
     });
@@ -41,18 +51,42 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const sendgridFromEmail = process.env.SENDGRID_FROM_EMAIL;
     const hasSendGrid = !!(sendgridApiKey && sendgridFromEmail);
 
-    if (!hasVerifiedSmtp && !hasSendGrid) {
-      return NextResponse.json({ error: 'No verified SMTP or SendGrid configured to send emails.' }, { status: 400 });
+    if (!gmailAccount && !hasVerifiedSmtp && !hasSendGrid) {
+      return NextResponse.json({ error: 'Connect a Gmail account to this campaign (or configure SMTP/SendGrid) to send replies.' }, { status: 400 });
     }
 
     const to = reply.lead.email;
-    const emailSubject = subject || `Re: ${reply.campaign.name}`;
+    const emailSubject = subject
+      ? buildReplySubject(subject)
+      : buildReplySubject(reply.subject, reply.campaign.name);
     const emailBody = body.replace(/\n/g, '<br/>');
 
     let sentMessageId = '';
+    const storedMessageId = (reply as any).messageId as string | null | undefined;
 
-    // Send email
-    if (hasVerifiedSmtp) {
+    // Send email — Priority 1: campaign's connected Gmail account
+    if (gmailAccount) {
+      let threadId: string | undefined;
+      const headers: Record<string, string> = {};
+
+      if (storedMessageId) {
+        const threading = await resolveGmailReplyThreading(gmailAccount.id, storedMessageId);
+        threadId = threading.threadId;
+        if (threading.inReplyTo) headers['In-Reply-To'] = threading.inReplyTo;
+        if (threading.references) headers['References'] = threading.references;
+      }
+
+      const info = await sendViaGmail(gmailAccount.id, {
+        to: to as string,
+        subject: emailSubject,
+        html: emailBody,
+        fromName: reply.campaign.senderName || user.name || undefined,
+        replyTo: gmailAccount.email,
+        threadId,
+        headers,
+      });
+      sentMessageId = info.messageId || '';
+    } else if (hasVerifiedSmtp) {
       const password = decryptSmtpPass(smtpAccount.smtpPassEncrypted);
       const username = decryptSmtpPass(smtpAccount.smtpUserEncrypted);
 
@@ -73,10 +107,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         html: emailBody,
       };
 
-      if ((reply as any).messageId) {
+      if (storedMessageId) {
         mailOptions.headers = {
-          'In-Reply-To': (reply as any).messageId,
-          'References': (reply as any).messageId
+          'In-Reply-To': storedMessageId,
+          'References': storedMessageId
         };
       }
 
@@ -95,13 +129,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         html: emailBody,
       };
 
-      if ((reply as any).messageId) {
+      if (storedMessageId) {
         msg.headers = {
-          'In-Reply-To': (reply as any).messageId,
-          'References': (reply as any).messageId
+          'In-Reply-To': storedMessageId,
+          'References': storedMessageId
         };
       }
-      
+
       const [response] = await sgMail.send(msg);
       sentMessageId = response.headers['x-message-id'] || 'sendgrid-generated-id';
     }

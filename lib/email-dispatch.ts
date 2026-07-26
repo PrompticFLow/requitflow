@@ -2,7 +2,7 @@ import { prisma } from '@/lib/prisma';
 import sgMail from '@sendgrid/mail';
 import nodemailer from 'nodemailer';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
-import { sendViaGmail, gmailSentTodayCount } from '@/lib/gmail';
+import { sendViaGmail, gmailSentTodayCount, resolveGmailReplyThreading } from '@/lib/gmail';
 
 export interface SendCampaignEmailOptions {
   to: string;
@@ -119,7 +119,9 @@ export async function sendCampaignEmail({
   
   // Use centralized anti-ban and safety checks
   const { canSendEmail } = require('./email/can-send-email');
-  const safetyCheck = await canSendEmail(user.id, lead.id, campaign.id);
+  const safetyCheck = await canSendEmail(user.id, lead.id, campaign.id, {
+    isReplyEmail: emailSequence.sequenceStep >= 99
+  });
   if (!safetyCheck.canSend) {
     return { success: false, error: safetyCheck.reason };
   }
@@ -141,6 +143,26 @@ export async function sendCampaignEmail({
           headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
         }
 
+        // Reply emails (step >= 99) must stay in the original Gmail thread
+        let threadId: string | undefined;
+        if (emailSequence.sequenceStep >= 99) {
+          const inbound = await prisma.emailReply.findFirst({
+            where: {
+              campaignId: campaign.id,
+              leadId: lead.id,
+              messageId: { not: null },
+            },
+            orderBy: { createdAt: 'desc' },
+            select: { messageId: true },
+          });
+          if (inbound?.messageId) {
+            const threading = await resolveGmailReplyThreading(gmailAccount.id, inbound.messageId);
+            threadId = threading.threadId;
+            if (threading.inReplyTo) headers['In-Reply-To'] = threading.inReplyTo;
+            if (threading.references) headers['References'] = threading.references;
+          }
+        }
+
         const info = await sendViaGmail(gmailAccount.id, {
           to,
           subject,
@@ -148,6 +170,7 @@ export async function sendCampaignEmail({
           text: text || html.replace(/<[^>]+>/g, ''),
           fromName: campaign.senderName || gmailAccount.displayName || user.name || undefined,
           replyTo: gmailAccount.email,
+          threadId,
           headers,
         });
 
@@ -200,13 +223,31 @@ export async function sendCampaignEmail({
         }
       });
 
-      const mailOptions = {
+      const mailOptions: any = {
         from: `"${smtpAccount.fromName}" <${smtpAccount.fromEmail}>`,
         to,
         subject,
         text: text || html.replace(/<[^>]+>/g, ''),
         html: finalHtml
       };
+
+      if (emailSequence.sequenceStep >= 99) {
+        const inbound = await prisma.emailReply.findFirst({
+          where: {
+            campaignId: campaign.id,
+            leadId: lead.id,
+            messageId: { not: null },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { messageId: true },
+        });
+        if (inbound?.messageId) {
+          mailOptions.headers = {
+            'In-Reply-To': inbound.messageId,
+            'References': inbound.messageId,
+          };
+        }
+      }
 
       const info = await transporter.sendMail(mailOptions);
       return {
@@ -223,7 +264,7 @@ export async function sendCampaignEmail({
   if (hasSendGrid) {
     sgMail.setApiKey(sendgridApiKey);
 
-    const msg = {
+    const msg: any = {
       to,
       from: {
         name: sendgridFromName,
@@ -233,6 +274,24 @@ export async function sendCampaignEmail({
       html: finalHtml,
       text: text || html.replace(/<[^>]+>/g, ''),
     };
+
+    if (emailSequence.sequenceStep >= 99) {
+      const inbound = await prisma.emailReply.findFirst({
+        where: {
+          campaignId: campaign.id,
+          leadId: lead.id,
+          messageId: { not: null },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { messageId: true },
+      });
+      if (inbound?.messageId) {
+        msg.headers = {
+          'In-Reply-To': inbound.messageId,
+          'References': inbound.messageId,
+        };
+      }
+    }
 
     try {
       const response = await sgMail.send(msg);
@@ -321,8 +380,15 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
     try {
       const { campaign, user, lead } = email;
 
+      // AI reply-continuation emails (step 99) are conversational responses:
+      // they send on their scheduled time and must NOT be blocked/cancelled
+      // just because the lead replied — that's exactly why they exist.
+      const isReplyEmail = email.sequenceStep >= 99;
+
       // 0. Dueness check
-      if (email.sequenceStep > 1) {
+      if (isReplyEmail) {
+        if (email.scheduledAt && email.scheduledAt > now) continue;
+      } else if (email.sequenceStep > 1) {
         // Follow-up: never due before the previous step was sent, regardless
         // of any scheduledAt stamp — and only after the delay has elapsed.
         const prevStep = await prisma.emailSequence.findFirst({
@@ -352,8 +418,11 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
         continue;
       }
 
-      // 2. Check if Lead Replied, Booked, or met any other stop condition
-      const stopStatuses = ['Booked', 'Not Interested', 'Replied', 'Bounced', 'Opportunity Won', 'Opportunity Lost', 'Spam complaint'];
+      // 2. Check if Lead Replied, Booked, or met any other stop condition.
+      // Reply-continuation emails only stop for hard-negative statuses.
+      const stopStatuses = isReplyEmail
+        ? ['Not Interested', 'Bounced', 'Unsubscribed', 'Spam complaint']
+        : ['Booked', 'Not Interested', 'Replied', 'Bounced', 'Opportunity Won', 'Opportunity Lost', 'Spam complaint'];
       if (stopStatuses.includes(lead.status)) {
         await prisma.emailSequence.update({
           where: { id: email.id },
@@ -363,17 +432,19 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
         continue;
       }
 
-      // Check EmailReply table for safety
-      const hasReply = await prisma.emailReply.findFirst({
-        where: { leadId: lead.id, campaignId: campaign.id }
-      });
-      if (hasReply) {
-        await prisma.emailSequence.update({
-          where: { id: email.id },
-          data: { status: 'Cancelled', errorMessage: 'Stopped because lead replied.' }
+      // Check EmailReply table for safety (sequence emails only)
+      if (!isReplyEmail) {
+        const hasReply = await prisma.emailReply.findFirst({
+          where: { leadId: lead.id, campaignId: campaign.id }
         });
-        processedCount++;
-        continue;
+        if (hasReply) {
+          await prisma.emailSequence.update({
+            where: { id: email.id },
+            data: { status: 'Cancelled', errorMessage: 'Stopped because lead replied.' }
+          });
+          processedCount++;
+          continue;
+        }
       }
 
       // 3. Check Limits
@@ -437,6 +508,18 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
             errorMessage: null
           }
         });
+
+        // Keep the inbound EmailReply in sync when this was an AI auto-reply
+        if (isReplyEmail) {
+          await prisma.emailReply.updateMany({
+            where: {
+              campaignId: campaign.id,
+              leadId: lead.id,
+              aiReplyStatus: { in: ['Queued', 'Draft'] },
+            },
+            data: { aiReplyStatus: 'Sent', status: 'Handled' },
+          });
+        }
 
         // Log sent
         await prisma.emailSendLog.update({

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import nodemailer from 'nodemailer';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
 import sgMail from '@sendgrid/mail';
+import { buildReplySubject } from '@/lib/email/reply-subject';
 
 export const maxDuration = 300;
 
@@ -61,8 +62,12 @@ export async function GET(req: Request) {
         }
 
         const to = reply.lead.email;
-        const emailSubject = reply.aiReplySubject || `Re: ${reply.subject || reply.campaign.name}`;
+        const emailSubject = buildReplySubject(
+          reply.aiReplySubject || reply.subject,
+          reply.campaign.name
+        );
         const emailBody = reply.aiSuggestedReply.replace(/\n/g, '<br/>');
+        const storedMessageId = (reply as any).messageId as string | null | undefined;
 
         let sentMessageId = '';
 
@@ -80,20 +85,23 @@ export async function GET(req: Request) {
             }
           });
 
-          const info = await transporter.sendMail({
+          const mailOptions: any = {
             from: `"${smtpAccount.fromName || reply.user.name || 'AI SDR'}" <${smtpAccount.fromEmail}>`,
             to: to as string,
             subject: emailSubject,
             html: emailBody,
-            headers: {
-              'In-Reply-To': (reply as any).messageId || '',
-              'References': (reply as any).messageId || ''
-            }
-          });
+          };
+          if (storedMessageId) {
+            mailOptions.headers = {
+              'In-Reply-To': storedMessageId,
+              'References': storedMessageId
+            };
+          }
+          const info = await transporter.sendMail(mailOptions);
           sentMessageId = info.messageId;
         } else {
           sgMail.setApiKey(sendgridApiKey!);
-          const msg = {
+          const msg: any = {
             to: to as string,
             from: {
               email: sendgridFromEmail as string,
@@ -102,7 +110,13 @@ export async function GET(req: Request) {
             subject: emailSubject,
             html: emailBody,
           };
-          
+          if (storedMessageId) {
+            msg.headers = {
+              'In-Reply-To': storedMessageId,
+              'References': storedMessageId
+            };
+          }
+
           const [response] = await sgMail.send(msg);
           sentMessageId = response.headers['x-message-id'] || 'sendgrid-generated-id';
         }

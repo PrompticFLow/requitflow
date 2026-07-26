@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import nodemailer from 'nodemailer';
 import sgMail from '@sendgrid/mail';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
+import { buildReplySubject } from '@/lib/email/reply-subject';
 
 export const maxDuration = 300;
 
@@ -82,10 +83,14 @@ export async function GET(req: Request) {
             auth: { user: username, pass },
           });
 
+          const replySubject = buildReplySubject(
+            reply.aiReplySubject || reply.subject,
+            campaign.name
+          );
           const mailOptions: any = {
             from: `"${fromName}" <${fromEmail}>`,
             to: reply.fromEmail,
-            subject: reply.aiReplySubject || `Re: ${reply.subject}`,
+            subject: replySubject,
             text: reply.aiSuggestedReply || '',
           };
           if ((reply as any).messageId) {
@@ -97,10 +102,14 @@ export async function GET(req: Request) {
           await transporter.sendMail(mailOptions);
         } else if (hasSendGrid) {
           sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
+          const replySubject = buildReplySubject(
+            reply.aiReplySubject || reply.subject,
+            campaign.name
+          );
           const msg: any = {
             to: reply.fromEmail,
             from: { email: process.env.SENDGRID_FROM_EMAIL!, name: fromName },
-            subject: reply.aiReplySubject || `Re: ${reply.subject}`,
+            subject: replySubject,
             text: reply.aiSuggestedReply || '',
           };
           if ((reply as any).messageId) {

@@ -5,7 +5,12 @@ export type CanSendResult = {
   reason: string;
 };
 
-export async function canSendEmail(userId: string, leadId: string, campaignId: string): Promise<CanSendResult> {
+export async function canSendEmail(
+  userId: string,
+  leadId: string,
+  campaignId: string,
+  options: { isReplyEmail?: boolean } = {}
+): Promise<CanSendResult> {
   // 1. Check if Lead Unsubscribed
   const lead = await prisma.lead.findUnique({
     where: { id: leadId },
@@ -25,22 +30,26 @@ export async function canSendEmail(userId: string, leadId: string, campaignId: s
     return { canSend: false, reason: "Lead is missing email address." };
   }
 
-  // 2. Check if Lead Replied
-  if (lead.replies && lead.replies.length > 0) {
-    return { canSend: false, reason: "Lead has already replied." };
-  }
-  
-  if (lead.status === "Replied" || lead.status === "Interested" || lead.status === "Not Interested") {
-    return { canSend: false, reason: `Lead status is ${lead.status}.` };
-  }
+  // 2/3. Replied & booked leads block sequence emails — but NOT AI reply
+  // continuations, which exist precisely to answer a lead who replied.
+  if (!options.isReplyEmail) {
+    if (lead.replies && lead.replies.length > 0) {
+      return { canSend: false, reason: "Lead has already replied." };
+    }
 
-  // 3. Check if Lead Booked a call
-  if (lead.bookedCalls && lead.bookedCalls.length > 0) {
-    return { canSend: false, reason: "Lead has booked a call." };
-  }
+    if (lead.status === "Replied" || lead.status === "Interested" || lead.status === "Not Interested") {
+      return { canSend: false, reason: `Lead status is ${lead.status}.` };
+    }
 
-  if (lead.status === "Call Booked" || lead.status === "Closed") {
-    return { canSend: false, reason: `Lead status is ${lead.status}.` };
+    if (lead.bookedCalls && lead.bookedCalls.length > 0) {
+      return { canSend: false, reason: "Lead has booked a call." };
+    }
+
+    if (lead.status === "Call Booked" || lead.status === "Closed") {
+      return { canSend: false, reason: `Lead status is ${lead.status}.` };
+    }
+  } else if (lead.status === "Not Interested") {
+    return { canSend: false, reason: "Lead is not interested." };
   }
 
   // 4. Check Hourly/Daily limits

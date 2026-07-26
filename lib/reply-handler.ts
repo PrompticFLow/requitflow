@@ -1,6 +1,8 @@
 import { prisma } from './prisma';
 import { generateAiResponse } from './ai-provider';
 import { getAvailableSlots, bookCalendarEvent } from './google-calendar';
+import { extractLatestReplyText } from './email/strip-quoted-reply';
+import { buildReplySubject } from './email/reply-subject';
 
 export interface InboundReplyPayload {
   fromEmail: string;
@@ -13,6 +15,25 @@ export interface InboundReplyPayload {
   campaignId?: string;
   leadId?: string;
   emailSequenceId?: string;
+}
+
+export { extractLatestReplyText } from './email/strip-quoted-reply';
+
+function hasUnsubscribeIntent(text: string): boolean {
+  const lower = text.toLowerCase();
+  const phrases = [
+    'unsubscribe',
+    'remove me',
+    'stop emailing',
+    'opt out',
+    'take me off',
+    'do not contact',
+    'don\'t contact',
+    'stop contacting',
+  ];
+  if (phrases.some((p) => lower.includes(p))) return true;
+  // Bare "stop" only as a whole short reply, not inside other words / quoted copy
+  return /^\s*stop[.!]?\s*$/i.test(text.trim());
 }
 
 export async function handleInboundReply(payload: InboundReplyPayload) {
@@ -38,6 +59,7 @@ export async function handleInboundReply(payload: InboundReplyPayload) {
   const normalizedTo = toEmail ? toEmail.trim().toLowerCase() : '';
   const normalizedSubject = subject ? subject.trim() : '';
   const normalizedBody = body.trim();
+  const latestReplyText = extractLatestReplyText(normalizedBody);
 
   // 1.5 Deduplication Check
   const dedupeQueries: any[] = [
@@ -69,10 +91,10 @@ export async function handleInboundReply(payload: InboundReplyPayload) {
   }
 
   // 2. Identify the entities (Priority matching)
-  let matchedLead = null;
-  let matchedCampaign = null;
-  let matchedUser = null;
-  let matchedSequence = null;
+  let matchedLead: any = null;
+  let matchedCampaign: any = null;
+  let matchedUser: any = null;
+  let matchedSequence: any = null;
 
   // Priority A: emailSequenceId if provided
   if (emailSequenceId) {
@@ -87,30 +109,50 @@ export async function handleInboundReply(payload: InboundReplyPayload) {
     }
   }
 
-  // Priority C: campaignId + leadId if provided
-  if (!matchedLead && campaignId && leadId) {
-    matchedLead = await prisma.lead.findFirst({
-      where: { id: leadId, campaignId },
+  // Priority C: leadId (+ optional campaignId via CampaignLead, not only Lead.campaignId)
+  if (!matchedLead && leadId) {
+    matchedLead = await prisma.lead.findUnique({
+      where: { id: leadId },
       include: { campaign: true, user: true }
     });
     if (matchedLead) {
-      matchedCampaign = matchedLead.campaign;
       matchedUser = matchedLead.user;
+      if (campaignId) {
+        const campaignLead = await prisma.campaignLead.findFirst({
+          where: { leadId, campaignId },
+          include: { campaign: true }
+        });
+        matchedCampaign =
+          campaignLead?.campaign ||
+          (matchedLead.campaignId === campaignId ? matchedLead.campaign : null);
+        if (!matchedCampaign) {
+          matchedCampaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
+        }
+      } else {
+        const latestCampaignLead = await prisma.campaignLead.findFirst({
+          where: { leadId },
+          orderBy: { addedAt: 'desc' },
+          include: { campaign: true }
+        });
+        matchedCampaign = latestCampaignLead?.campaign || matchedLead.campaign;
+      }
     }
   }
 
-  // Priority D: fromEmail + lead email + active campaign
+  // Priority D: fromEmail + CampaignLead on an active campaign
   if (!matchedLead) {
-    matchedLead = await prisma.lead.findFirst({
+    const campaignLead = await prisma.campaignLead.findFirst({
       where: {
-        email: { equals: normalizedFrom, mode: 'insensitive' },
-        campaign: { status: 'Active' }
+        campaign: { status: 'Active' },
+        lead: { email: { equals: normalizedFrom, mode: 'insensitive' } }
       },
-      include: { campaign: true, user: true }
+      orderBy: { addedAt: 'desc' },
+      include: { lead: { include: { user: true } }, campaign: true }
     });
-    if (matchedLead) {
-      matchedCampaign = matchedLead.campaign;
-      matchedUser = matchedLead.user;
+    if (campaignLead) {
+      matchedLead = campaignLead.lead;
+      matchedCampaign = campaignLead.campaign;
+      matchedUser = campaignLead.lead.user;
     }
   }
 
@@ -125,6 +167,14 @@ export async function handleInboundReply(payload: InboundReplyPayload) {
     if (matchedLead) {
       matchedCampaign = matchedLead.campaign;
       matchedUser = matchedLead.user;
+      if (!matchedCampaign) {
+        const latestCampaignLead = await prisma.campaignLead.findFirst({
+          where: { leadId: matchedLead.id },
+          orderBy: { addedAt: 'desc' },
+          include: { campaign: true }
+        });
+        matchedCampaign = latestCampaignLead?.campaign || null;
+      }
     }
   }
 
@@ -172,17 +222,15 @@ export async function handleInboundReply(payload: InboundReplyPayload) {
     futureFollowUpsCancelled = cancelRes.count;
   }
 
-  // Keywords check for Unsubscribe
-  const lowerText = normalizedBody.toLowerCase();
-  const unsubWords = ['unsubscribe', 'remove me', 'stop emailing', 'opt out', 'take me off', 'do not contact', 'stop'];
-  const isUnsubscribeKeyword = unsubWords.some(w => lowerText.includes(w));
+  // Keywords check for Unsubscribe — only on the new reply text, not quoted originals
+  const isUnsubscribeKeyword = hasUnsubscribeIntent(latestReplyText);
 
   let classification = 'Unknown';
   let confidence = 0.5;
   let shouldReply = false;
   let canAutoSend = false;
   let aiSuggestedReplyStr = '';
-  let aiReplySubjectStr = normalizedSubject ? `Re: ${normalizedSubject}` : 'Re: Quick question';
+  let aiReplySubjectStr = buildReplySubject(normalizedSubject, 'Quick question');
   let detectedSlotIndex = -1;
 
   // Check Google Calendar Integration
@@ -259,8 +307,8 @@ ${priorContext ? priorContext : 'No prior sent emails found.'}
 Conversation History (Previous Replies from Lead):
 ${priorReplyContext ? priorReplyContext : 'No prior replies found.'}
 
-CURRENT REPLY FROM LEAD:
-"${normalizedBody}"
+CURRENT REPLY FROM LEAD (new text only — ignore any quoted original email):
+"${latestReplyText}"
 
 Previously Suggested Times (if any):
 ${existingSuggestedSlots.map((s, i) => `${i + 1}. ${s.label}`).join('\n')}
@@ -291,7 +339,7 @@ Output ONLY valid JSON matching this schema:
   "canAutoSend": true,
   "needsHuman": false,
   "detectedSlotIndex": -1,
-  "subject": "Re: ${normalizedSubject || 'Quick question'}",
+  "subject": "${buildReplySubject(normalizedSubject, 'Quick question')}",
   "body": "Your generated natural response here..."
 }`;
 
@@ -311,7 +359,7 @@ Output ONLY valid JSON matching this schema:
         canAutoSend = parsed.canAutoSend || false;
         if (parsed.needsHuman) canAutoSend = false; // Override for human handoff
         aiSuggestedReplyStr = parsed.body || '';
-        aiReplySubjectStr = parsed.subject || aiReplySubjectStr;
+        aiReplySubjectStr = buildReplySubject(parsed.subject || aiReplySubjectStr, 'Quick question');
         detectedSlotIndex = parsed.detectedSlotIndex ?? -1;
       }
     } catch (e) {
@@ -451,6 +499,7 @@ Output ONLY valid JSON matching this schema:
       toEmail: normalizedTo,
       subject: normalizedSubject,
       body: normalizedBody,
+      messageId: messageId || null,
       classification,
       confidence,
       shouldReply,

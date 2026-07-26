@@ -35,11 +35,44 @@ export async function GET(req: Request) {
       }
     });
 
-    if (accounts.length === 0) {
-      return NextResponse.json({ success: true, message: 'No active IMAP accounts to poll.' });
+    let totalRepliesProcessed = 0;
+    let gmailRepliesFound = 0;
+
+    // Also poll connected Gmail accounts (primary path for campaign sending)
+    try {
+      const { getCurrentUser } = await import('@/lib/auth');
+      const user = await getCurrentUser().catch(() => null);
+      const { pollGmailAccount } = await import('@/lib/gmail');
+      const gmailAccounts = await prisma.gmailAccount.findMany({
+        where: {
+          status: 'Active',
+          ...(user && !hasCronSecret ? { userId: user.id } : {})
+        },
+        select: { id: true, email: true }
+      });
+      for (const account of gmailAccounts) {
+        try {
+          const result = await pollGmailAccount(account.id);
+          gmailRepliesFound += result.repliesFound || 0;
+          totalRepliesProcessed += result.repliesFound || 0;
+        } catch (err: any) {
+          console.error('Gmail poll failed for', account.email, err?.message);
+        }
+      }
+    } catch (err: any) {
+      console.error('Gmail poll section failed:', err?.message);
     }
 
-    let totalRepliesProcessed = 0;
+    if (accounts.length === 0) {
+      return NextResponse.json({
+        success: true,
+        processedCount: totalRepliesProcessed,
+        gmailRepliesFound,
+        message: gmailRepliesFound > 0
+          ? `Synced ${gmailRepliesFound} Gmail replies.`
+          : 'No new replies found.'
+      });
+    }
 
     for (const account of accounts) {
       let client: ImapFlow | null = null;

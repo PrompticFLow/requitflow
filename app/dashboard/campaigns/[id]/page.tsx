@@ -2,7 +2,8 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Loader2, Mail, Users, Check, RefreshCw, Save, AlertTriangle, CheckCircle2, X, Search, Pencil } from "lucide-react";
+import { Loader2, Mail, Users, Check, RefreshCw, Save, AlertTriangle, CheckCircle2, X, Search, Pencil, MessageSquare, Send } from "lucide-react";
+import { extractLatestReplyText } from "@/lib/email/strip-quoted-reply";
 
 export default function CampaignDetailPage() {
   const params = useParams();
@@ -12,6 +13,7 @@ export default function CampaignDetailPage() {
   const [loading, setLoading] = useState(true);
   const [campaignLeads, setCampaignLeads] = useState<any[]>([]);
   const [campaignData, setCampaignData] = useState<any>(null);
+  const [campaignReplies, setCampaignReplies] = useState<any[]>([]);
 
   // Gmail Sending Account State
   const [gmailAccounts, setGmailAccounts] = useState<any[]>([]);
@@ -31,6 +33,49 @@ export default function CampaignDetailPage() {
   const [editingOffer, setEditingOffer] = useState(false);
   const [offerDraft, setOfferDraft] = useState("");
   const [savingOffer, setSavingOffer] = useState(false);
+
+  // Booking link editing state
+  const [editingBooking, setEditingBooking] = useState(false);
+  const [bookingDraft, setBookingDraft] = useState("");
+  const [savingBooking, setSavingBooking] = useState(false);
+
+  const handleSaveBookingLink = async () => {
+    const link = bookingDraft.trim();
+    if (link && !/^https?:\/\//i.test(link)) {
+      return alert("Please enter a full URL starting with https:// (e.g. your Calendly link).");
+    }
+    setSavingBooking(true);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookingLink: link || null, ctaLink: link || null })
+      });
+      if (res.ok) {
+        setEditingBooking(false);
+        await fetchCampaignData(true);
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to save booking link.");
+      }
+    } catch (e) { console.error(e); }
+    setSavingBooking(false);
+  };
+
+  const handleChangeReplyMode = async (mode: string) => {
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoReplyMode: mode, autoReplyEnabled: mode !== 'manual_only' })
+      });
+      if (res.ok) await fetchCampaignData(true);
+      else {
+        const data = await res.json();
+        alert(data.error || "Failed to update reply mode.");
+      }
+    } catch (e) { console.error(e); }
+  };
 
   const handleSaveOffer = async () => {
     if (!offerDraft.trim()) return alert("Offer cannot be empty.");
@@ -58,10 +103,11 @@ export default function CampaignDetailPage() {
   const fetchCampaignData = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [seqRes, campRes, gmailRes] = await Promise.all([
+      const [seqRes, campRes, gmailRes, repliesRes] = await Promise.all([
         fetch(`/api/campaigns/${campaignId}/email-sequences`),
         fetch(`/api/campaigns/${campaignId}`),
-        fetch(`/api/integrations/gmail/accounts`)
+        fetch(`/api/integrations/gmail/accounts`),
+        fetch(`/api/replies?campaignId=${campaignId}`)
       ]);
       const seqData = await seqRes.json();
       if (seqData.campaignLeads) setCampaignLeads(seqData.campaignLeads);
@@ -74,6 +120,11 @@ export default function CampaignDetailPage() {
       if (gmailRes.ok) {
         const gmailData = await gmailRes.json();
         setGmailAccounts(gmailData.accounts || []);
+      }
+
+      if (repliesRes.ok) {
+        const repliesData = await repliesRes.json();
+        setCampaignReplies(repliesData.replies || []);
       }
     } catch(e) {
       console.error(e);
@@ -211,7 +262,7 @@ export default function CampaignDetailPage() {
     } catch (e) { console.error(e); }
   };
 
-  const tabs = ["Overview", "Leads"];
+  const tabs = ["Overview", "Leads", "Replies"];
 
   return (
     <div className="space-y-6">
@@ -229,7 +280,7 @@ export default function CampaignDetailPage() {
             onClick={() => setActiveTab(tab)}
             className={`px-5 py-2.5 font-medium rounded-t-lg transition-colors whitespace-nowrap ${activeTab === tab ? 'bg-purple-600/20 text-purple-400 border-b-2 border-purple-500' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-300'}`}
           >
-            {tab}
+            {tab}{tab === 'Replies' && campaignReplies.length > 0 ? ` (${campaignReplies.length})` : ''}
           </button>
         ))}
       </div>
@@ -322,6 +373,68 @@ export default function CampaignDetailPage() {
                ) : (
                  <p className="text-sm text-slate-300">{campaignData?.offer || <span className="text-slate-500 italic">No offer set yet — click Edit Offer to add one. The AI uses it to write every email.</span>}</p>
                )}
+             </div>
+
+             {/* Booking Link & AI Reply Handling */}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+               <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-6">
+                 <div className="flex justify-between items-start mb-2">
+                   <h4 className="text-white font-bold">Booking Link (Calendly)</h4>
+                   {!editingBooking && (
+                     <button
+                       onClick={() => { setBookingDraft(campaignData?.bookingLink || campaignData?.ctaLink || ""); setEditingBooking(true); }}
+                       className="text-slate-400 hover:text-purple-400 transition-colors flex items-center gap-1 text-xs"
+                     >
+                       <Pencil size={13} /> Edit
+                     </button>
+                   )}
+                 </div>
+                 <p className="text-xs text-slate-500 mb-3">AI includes this link in emails and replies so prospects can book a call directly.</p>
+                 {editingBooking ? (
+                   <div className="space-y-3">
+                     <input
+                       type="url"
+                       value={bookingDraft}
+                       onChange={e => setBookingDraft(e.target.value)}
+                       placeholder="e.g. https://calendly.com/yourname/30min"
+                       className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white text-sm focus:border-purple-500 outline-none"
+                     />
+                     <div className="flex justify-end gap-2">
+                       <button onClick={() => setEditingBooking(false)} className="px-3 py-1.5 text-xs text-slate-300 hover:text-white transition-colors">Cancel</button>
+                       <button
+                         onClick={handleSaveBookingLink}
+                         disabled={savingBooking}
+                         className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-bold rounded transition-colors flex items-center gap-1.5"
+                       >
+                         {savingBooking ? <Loader2 className="animate-spin" size={13} /> : <Save size={13} />} Save Link
+                       </button>
+                     </div>
+                   </div>
+                 ) : (
+                   (campaignData?.bookingLink || campaignData?.ctaLink) ? (
+                     <a href={campaignData.bookingLink || campaignData.ctaLink} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-400 hover:text-blue-300 break-all">
+                       {campaignData.bookingLink || campaignData.ctaLink}
+                     </a>
+                   ) : (
+                     <p className="text-sm text-slate-500 italic">No booking link set — add your Calendly link so the AI can book calls for you.</p>
+                   )
+                 )}
+               </div>
+
+               <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-6">
+                 <h4 className="text-white font-bold mb-2">AI Reply Handling</h4>
+                 <p className="text-xs text-slate-500 mb-3">When a prospect replies, AI classifies their intent (interested, pricing question, meeting request, not interested…) and writes a contextual response pushing toward a booked call.</p>
+                 <select
+                   value={campaignData?.autoReplyMode || 'draft_first'}
+                   onChange={e => handleChangeReplyMode(e.target.value)}
+                   className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white text-sm focus:border-purple-500 outline-none"
+                 >
+                   <option value="draft_first">Draft First — AI drafts a reply, you review &amp; send</option>
+                   <option value="auto_send_safe">Auto-send Safe Replies — AI answers automatically when confident</option>
+                   <option value="manual_only">Manual Only — AI classifies but never replies</option>
+                 </select>
+                 <p className="text-xs text-slate-500 mt-2">Drafts appear in the <Link href="/dashboard/replies" className="text-purple-400 hover:text-purple-300">Replies Inbox</Link>.</p>
+               </div>
              </div>
 
              {/* Sending Account */}
@@ -461,7 +574,7 @@ export default function CampaignDetailPage() {
              </div>
            </div>
          </div>
-      ) : (
+      ) : activeTab === "Leads" ? (
          <div className="space-y-6">
            <div className="flex justify-between items-center bg-slate-900/50 p-6 rounded-2xl border border-slate-700/50">
              <div>
@@ -653,6 +766,12 @@ export default function CampaignDetailPage() {
              </div>
            )}
          </div>
+      ) : (
+        <CampaignRepliesTab
+          campaignLeads={campaignLeads}
+          replies={campaignReplies}
+          onRefresh={() => fetchCampaignData(true)}
+        />
       )}
 
       {editLeadModal && (
@@ -678,6 +797,241 @@ export default function CampaignDetailPage() {
           onClose={() => setEmailModal(null)}
         />
       )}
+    </div>
+  );
+}
+
+function htmlToPlain(text: string): string {
+  return String(text || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .trim();
+}
+
+/** Chat-friendly body: strip HTML and quoted email history. */
+function chatMessageBody(text: string): string {
+  return extractLatestReplyText(htmlToPlain(text));
+}
+
+function CampaignRepliesTab({ campaignLeads, replies, onRefresh }: { campaignLeads: any[], replies: any[], onRefresh: () => void }) {
+  const leadsById: Record<string, any> = {};
+  campaignLeads.forEach(cl => { leadsById[cl.lead.id] = cl.lead; });
+
+  // Group replies into conversations per lead, newest activity first
+  const conversations: { leadId: string; lead: any; replies: any[] }[] = [];
+  for (const reply of replies) {
+    if (!reply.leadId) continue;
+    let conv = conversations.find(c => c.leadId === reply.leadId);
+    if (!conv) {
+      conv = { leadId: reply.leadId, lead: leadsById[reply.leadId] || reply.lead, replies: [] };
+      conversations.push(conv);
+    }
+    conv.replies.push(reply);
+  }
+  conversations.forEach(c => c.replies.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
+  conversations.sort((a, b) => new Date(b.replies[b.replies.length - 1].createdAt).getTime() - new Date(a.replies[a.replies.length - 1].createdAt).getTime());
+
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const syncInbox = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/email/poll-replies');
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to sync inbox');
+      } else {
+        const count = data.processedCount || 0;
+        if (count > 0) alert(`Synced ${count} new reply${count === 1 ? '' : 'ies'}.`);
+        onRefresh();
+      }
+    } catch {
+      alert('Error syncing inbox');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const activeLeadId = selectedLeadId && conversations.some(c => c.leadId === selectedLeadId)
+    ? selectedLeadId
+    : conversations[0]?.leadId || null;
+  const activeConv = conversations.find(c => c.leadId === activeLeadId) || null;
+  const activeLead = activeConv?.lead;
+
+  const latestInbound = activeConv ? activeConv.replies[activeConv.replies.length - 1] : null;
+  const aiDraft = latestInbound && latestInbound.aiSuggestedReply && latestInbound.aiReplyStatus !== 'Sent'
+    ? latestInbound.aiSuggestedReply
+    : null;
+
+  // Build the chat timeline: sent campaign emails + inbound replies
+  const outbound = (activeLead?.emailSequences || [])
+    .filter((e: any) => e.status === 'Sent' && e.sentAt)
+    .map((e: any) => ({
+      kind: 'out' as const,
+      time: e.sentAt,
+      subject: e.subject,
+      body: chatMessageBody(e.body),
+      label: e.sequenceStep >= 99 ? 'Reply' : `Email ${e.sequenceStep}`,
+    }));
+  const inbound = (activeConv?.replies || []).map((r: any) => ({
+    kind: 'in' as const,
+    time: r.createdAt,
+    subject: r.subject,
+    body: chatMessageBody(r.emailBody || r.body),
+    classification: r.aiCategory || r.classification || 'Unknown',
+  }));
+  const messages = [...outbound, ...inbound].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+
+  const handleSend = async () => {
+    if (!replyText.trim() || !latestInbound) return;
+    setSending(true);
+    try {
+      const res = await fetch(`/api/replies/${latestInbound.id}/send-reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: replyText.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to send reply.');
+      } else {
+        setReplyText("");
+        onRefresh();
+      }
+    } catch (e) { console.error(e); }
+    setSending(false);
+  };
+
+  if (conversations.length === 0) {
+    return (
+      <div className="glass p-12 rounded-2xl border border-slate-700/50 text-center">
+        <MessageSquare size={40} className="text-slate-600 mx-auto mb-4" />
+        <h3 className="text-lg text-white mb-2">No replies yet.</h3>
+        <p className="text-slate-400 text-sm max-w-md mx-auto mb-6">
+          When a prospect replies to a campaign email, the conversation will appear here.
+          AI classifies their intent and drafts a contextual response you can review and send.
+        </p>
+        <button
+          onClick={syncInbox}
+          disabled={syncing}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          <RefreshCw size={15} className={syncing ? 'animate-spin' : ''} />
+          {syncing ? 'Syncing…' : 'Sync Inbox'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
+      {/* Conversation list */}
+      <div className="glass rounded-xl border border-slate-700/50 overflow-hidden lg:max-h-[650px] overflow-y-auto">
+        <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between gap-2">
+          <h4 className="text-white font-bold text-sm flex items-center gap-2">
+            <MessageSquare size={15} className="text-purple-400" /> Conversations ({conversations.length})
+          </h4>
+          <button
+            onClick={syncInbox}
+            disabled={syncing}
+            title="Sync Gmail inbox for new replies"
+            className="text-xs text-slate-400 hover:text-white flex items-center gap-1.5 px-2 py-1 rounded border border-slate-700 hover:border-slate-500 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={12} className={syncing ? 'animate-spin' : ''} />
+            Sync
+          </button>
+        </div>
+        {conversations.map(conv => {
+          const last = conv.replies[conv.replies.length - 1];
+          const isActive = conv.leadId === activeLeadId;
+          return (
+            <button
+              key={conv.leadId}
+              onClick={() => { setSelectedLeadId(conv.leadId); setReplyText(""); }}
+              className={`w-full text-left p-4 border-b border-slate-800/50 transition-colors ${isActive ? 'bg-purple-500/10 border-l-2 border-l-purple-500' : 'hover:bg-slate-800/40'}`}
+            >
+              <div className="flex justify-between items-start mb-1">
+                <p className="text-sm font-bold text-white truncate">
+                  {conv.lead?.fullName || conv.lead?.firstName || conv.lead?.businessName || last.fromEmail}
+                </p>
+                <span className="text-[10px] text-slate-500 shrink-0 ml-2">{shortDate(last.createdAt)}</span>
+              </div>
+              <p className="text-xs text-slate-400 truncate mb-1.5">{conv.lead?.companyName || conv.lead?.businessName || last.fromEmail}</p>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/30">
+                  {last.aiCategory || last.classification || 'Unknown'}
+                </span>
+                {last.status === 'Unread' && <span className="w-2 h-2 rounded-full bg-blue-400" />}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Chat thread */}
+      <div className="lg:col-span-2 glass rounded-xl border border-slate-700/50 flex flex-col lg:max-h-[650px]">
+        <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+          <div>
+            <h4 className="text-white font-bold text-sm">
+              {activeLead?.fullName || activeLead?.firstName || activeLead?.businessName || latestInbound?.fromEmail}
+            </h4>
+            <p className="text-xs text-slate-400">{latestInbound?.fromEmail}</p>
+          </div>
+          {latestInbound && (
+            <span className="text-[10px] px-2 py-1 rounded bg-purple-500/10 text-purple-400 border border-purple-500/30">
+              Intent: {latestInbound.aiCategory || latestInbound.classification || 'Unknown'}
+            </span>
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-[300px]">
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.kind === 'out' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[80%] rounded-xl p-4 text-sm ${msg.kind === 'out' ? 'bg-purple-600/20 border border-purple-500/30 text-purple-100' : 'bg-slate-800 border border-slate-700 text-slate-200'}`}>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className={`text-[10px] font-bold uppercase tracking-wide ${msg.kind === 'out' ? 'text-purple-400' : 'text-slate-400'}`}>
+                    {msg.kind === 'out' ? `You · ${(msg as any).label}` : 'Prospect'}
+                  </span>
+                  <span className="text-[10px] text-slate-500">{new Date(msg.time).toLocaleString()}</span>
+                </div>
+                {msg.subject && <p className="text-xs font-semibold mb-1 opacity-80">{msg.subject}</p>}
+                <p className="whitespace-pre-wrap">{msg.body}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Composer */}
+        <div className="p-4 border-t border-slate-800 bg-slate-900/40 space-y-2">
+          {aiDraft && (
+            <button
+              onClick={() => setReplyText(htmlToPlain(aiDraft))}
+              className="text-xs px-2.5 py-1.5 bg-purple-500/10 text-purple-300 border border-purple-500/30 rounded hover:bg-purple-500/20 transition-colors flex items-center gap-1.5"
+            >
+              <MessageSquare size={12} /> Use AI-suggested reply
+            </button>
+          )}
+          <div className="flex gap-2 items-end">
+            <textarea
+              value={replyText}
+              onChange={e => setReplyText(e.target.value)}
+              rows={3}
+              placeholder={`Reply to ${activeLead?.firstName || 'this prospect'}... (sent from your connected Gmail)`}
+              className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-purple-500 outline-none resize-none"
+            />
+            <button
+              onClick={handleSend}
+              disabled={sending || !replyText.trim()}
+              className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 shrink-0"
+            >
+              {sending ? <Loader2 className="animate-spin" size={15} /> : <Send size={15} />} Send
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
