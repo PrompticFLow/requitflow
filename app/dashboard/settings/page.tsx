@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Check, Server, Loader2, AlertCircle, Mail, Save, RefreshCw, Sparkles } from "lucide-react";
+import { Check, Server, Loader2, AlertCircle, Mail, Save, RefreshCw, Sparkles, KeyRound } from "lucide-react";
 
 export default function SettingsPage() {
   const [jobSettings, setJobSettings] = useState<any>(null);
@@ -9,6 +9,22 @@ export default function SettingsPage() {
   const [appLanguage, setAppLanguage] = useState("en");
   const [autoSendMode, setAutoSendMode] = useState(false);
   const [languageSaving, setLanguageSaving] = useState(false);
+
+  // BYOK API Keys
+  const [isByok, setIsByok] = useState(false);
+  const [apiKeysConfigured, setApiKeysConfigured] = useState<Record<string, boolean>>({});
+  const [apiKeysData, setApiKeysData] = useState({
+    openRouterKeyEncrypted: '',
+    neverBounceKeyEncrypted: '',
+    apifyTokenEncrypted: '',
+    bayOfAssetsKeyEncrypted: '',
+    bayOfAssetsModel: '',
+    pdlKeyEncrypted: '',
+    twilioSidEncrypted: '',
+    twilioAuthTokenEncrypted: '',
+    twilioPhone: '',
+  });
+  const [apiKeysSaving, setApiKeysSaving] = useState(false);
   
   // SMTP Settings State
   const [smtpData, setSmtpData] = useState({
@@ -73,9 +89,23 @@ export default function SettingsPage() {
     fetch("/api/settings")
       .then(res => res.json())
       .then(data => {
+        if (typeof data.isByok === 'boolean') setIsByok(data.isByok);
+        if (data.configured) setApiKeysConfigured(data.configured);
         if (data.settings) {
           if (data.settings.appLanguage) setAppLanguage(data.settings.appLanguage);
           if (data.settings.autoSendMode !== undefined) setAutoSendMode(data.settings.autoSendMode);
+          setApiKeysData(prev => ({
+            ...prev,
+            openRouterKeyEncrypted: data.settings.openRouterKeyEncrypted === '********' ? '' : (data.settings.openRouterKeyEncrypted || ''),
+            neverBounceKeyEncrypted: data.settings.neverBounceKeyEncrypted === '********' ? '' : (data.settings.neverBounceKeyEncrypted || ''),
+            apifyTokenEncrypted: data.settings.apifyTokenEncrypted === '********' ? '' : (data.settings.apifyTokenEncrypted || ''),
+            bayOfAssetsKeyEncrypted: data.settings.bayOfAssetsKeyEncrypted === '********' ? '' : (data.settings.bayOfAssetsKeyEncrypted || ''),
+            bayOfAssetsModel: data.settings.bayOfAssetsModel || '',
+            pdlKeyEncrypted: data.settings.pdlKeyEncrypted === '********' ? '' : (data.settings.pdlKeyEncrypted || ''),
+            twilioSidEncrypted: data.settings.twilioSidEncrypted === '********' ? '' : (data.settings.twilioSidEncrypted || ''),
+            twilioAuthTokenEncrypted: data.settings.twilioAuthTokenEncrypted === '********' ? '' : (data.settings.twilioAuthTokenEncrypted || ''),
+            twilioPhone: data.settings.twilioPhone || '',
+          }));
         }
       })
       .catch(console.error);
@@ -200,6 +230,61 @@ export default function SettingsPage() {
       alert("Failed to save settings.");
     }
     setLanguageSaving(false);
+  };
+
+  const handleSaveApiKeys = async () => {
+    setApiKeysSaving(true);
+    try {
+      const payload: Record<string, string> = {};
+      const secretFields = [
+        'openRouterKeyEncrypted',
+        'neverBounceKeyEncrypted',
+        'apifyTokenEncrypted',
+        'bayOfAssetsKeyEncrypted',
+        'pdlKeyEncrypted',
+        'twilioSidEncrypted',
+        'twilioAuthTokenEncrypted',
+      ] as const;
+
+      for (const field of secretFields) {
+        const value = apiKeysData[field].trim();
+        if (value) payload[field] = value;
+      }
+      if (apiKeysData.bayOfAssetsModel.trim()) {
+        payload.bayOfAssetsModel = apiKeysData.bayOfAssetsModel.trim();
+      }
+      if (apiKeysData.twilioPhone.trim()) {
+        payload.twilioPhone = apiKeysData.twilioPhone.trim();
+      }
+
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        alert("API keys saved successfully.");
+        setApiKeysData(prev => ({
+          ...prev,
+          openRouterKeyEncrypted: '',
+          neverBounceKeyEncrypted: '',
+          apifyTokenEncrypted: '',
+          bayOfAssetsKeyEncrypted: '',
+          pdlKeyEncrypted: '',
+          twilioSidEncrypted: '',
+          twilioAuthTokenEncrypted: '',
+        }));
+        const refreshed = await fetch("/api/settings").then(r => r.json());
+        if (refreshed.configured) setApiKeysConfigured(refreshed.configured);
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to save API keys.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Failed to save API keys.");
+    }
+    setApiKeysSaving(false);
   };
 
   const handleSaveSmtp = async () => {
@@ -393,6 +478,168 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
+
+        {/* BYOK API Keys — only when IS_BYOK=true */}
+        {isByok && (
+          <div id="api-keys" className="glass p-8 rounded-2xl border border-slate-700/50 space-y-6 break-inside-avoid mb-6">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center space-x-3">
+                <KeyRound className="text-purple-400" size={24} />
+                <h3 className="text-xl font-bold text-white">API Keys</h3>
+              </div>
+            </div>
+            <p className="text-sm text-slate-400 leading-relaxed">
+              This deployment requires you to bring your own keys. Leave a field blank to keep the currently saved key.
+            </p>
+
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
+                  OpenRouter API Key
+                  {apiKeysConfigured.openrouter && (
+                    <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded border border-green-500/30">Saved</span>
+                  )}
+                </label>
+                <input
+                  type="password"
+                  value={apiKeysData.openRouterKeyEncrypted}
+                  onChange={e => setApiKeysData({ ...apiKeysData, openRouterKeyEncrypted: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
+                  placeholder={apiKeysConfigured.openrouter ? "Saved key hidden. Enter a new key only to replace it." : "sk-or-..."}
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
+                  NeverBounce API Key
+                  {apiKeysConfigured.neverbounce && (
+                    <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded border border-green-500/30">Saved</span>
+                  )}
+                </label>
+                <input
+                  type="password"
+                  value={apiKeysData.neverBounceKeyEncrypted}
+                  onChange={e => setApiKeysData({ ...apiKeysData, neverBounceKeyEncrypted: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
+                  placeholder={apiKeysConfigured.neverbounce ? "Saved key hidden. Enter a new key only to replace it." : ""}
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
+                  Apify API Token
+                  {apiKeysConfigured.apify && (
+                    <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded border border-green-500/30">Saved</span>
+                  )}
+                </label>
+                <input
+                  type="password"
+                  value={apiKeysData.apifyTokenEncrypted}
+                  onChange={e => setApiKeysData({ ...apiKeysData, apifyTokenEncrypted: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
+                  placeholder={apiKeysConfigured.apify ? "Saved key hidden. Enter a new key only to replace it." : "apify_api_..."}
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
+                  Bay of Assets API Key
+                  {apiKeysConfigured.bayofassets && (
+                    <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded border border-green-500/30">Saved</span>
+                  )}
+                </label>
+                <input
+                  type="password"
+                  value={apiKeysData.bayOfAssetsKeyEncrypted}
+                  onChange={e => setApiKeysData({ ...apiKeysData, bayOfAssetsKeyEncrypted: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
+                  placeholder={apiKeysConfigured.bayofassets ? "Saved key hidden. Enter a new key only to replace it." : ""}
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-400">Bay of Assets Model (optional)</label>
+                <input
+                  type="text"
+                  value={apiKeysData.bayOfAssetsModel}
+                  onChange={e => setApiKeysData({ ...apiKeysData, bayOfAssetsModel: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
+                  placeholder="Optional model override"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
+                  People Data Labs API Key
+                  {apiKeysConfigured.pdl && (
+                    <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded border border-green-500/30">Saved</span>
+                  )}
+                </label>
+                <input
+                  type="password"
+                  value={apiKeysData.pdlKeyEncrypted}
+                  onChange={e => setApiKeysData({ ...apiKeysData, pdlKeyEncrypted: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
+                  placeholder={apiKeysConfigured.pdl ? "Saved key hidden. Enter a new key only to replace it." : ""}
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
+                    Twilio Account SID
+                    {apiKeysConfigured.twilio && (
+                      <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded border border-green-500/30">Saved</span>
+                    )}
+                  </label>
+                  <input
+                    type="password"
+                    value={apiKeysData.twilioSidEncrypted}
+                    onChange={e => setApiKeysData({ ...apiKeysData, twilioSidEncrypted: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
+                    placeholder={apiKeysConfigured.twilio ? "Saved. Enter only to replace." : "AC..."}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-slate-400">Twilio Auth Token</label>
+                  <input
+                    type="password"
+                    value={apiKeysData.twilioAuthTokenEncrypted}
+                    onChange={e => setApiKeysData({ ...apiKeysData, twilioAuthTokenEncrypted: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
+                    placeholder={apiKeysConfigured.twilio ? "Saved. Enter only to replace." : ""}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-400">Twilio Phone Number</label>
+                <input
+                  type="text"
+                  value={apiKeysData.twilioPhone}
+                  onChange={e => setApiKeysData({ ...apiKeysData, twilioPhone: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
+                  placeholder="+15551234567"
+                />
+              </div>
+
+              <button
+                onClick={handleSaveApiKeys}
+                disabled={apiKeysSaving}
+                className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition-colors shadow-lg flex items-center justify-center gap-2"
+              >
+                {apiKeysSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />} Save API Keys
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* SMTP Settings */}
         <div id="smtp" className="glass p-8 rounded-2xl border border-slate-700/50 space-y-6 break-inside-avoid mb-6">

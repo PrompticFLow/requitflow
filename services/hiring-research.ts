@@ -14,15 +14,18 @@ export interface HiringResult {
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-export async function researchHiring(lead: {
-  businessName: string;
-  website?: string | null;
-  category?: string | null;
-  country?: string | null;
-  location?: string | null;
-  linkedinUrl?: string | null;
-}): Promise<HiringResult> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+export async function researchHiring(
+  lead: {
+    businessName: string;
+    website?: string | null;
+    category?: string | null;
+    country?: string | null;
+    location?: string | null;
+    linkedinUrl?: string | null;
+  },
+  openRouterApiKey?: string
+): Promise<HiringResult> {
+  const apiKey = (openRouterApiKey || process.env.OPENROUTER_API_KEY || '').trim();
   if (!apiKey) {
     return { status: 'Unknown', signal: null, sourceUrl: null, jobCount: null, error: 'OPENROUTER_API_KEY is not configured.' };
   }

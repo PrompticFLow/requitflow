@@ -1,11 +1,22 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { generateText } from '@/services/bayofassets';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  let apiKey: string;
+  try {
+    apiKey = await resolveUserApiKey(user.id, 'bayofassets');
+  } catch (e: any) {
+    if (e instanceof ByokKeyMissingError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    throw e;
   }
 
   try {
@@ -36,7 +47,6 @@ Return your response strictly as valid JSON matching this schema:
   "questions": ["Question 1", "Question 2", "Question 3"]
 }`;
 
-    const apiKey = process.env.BAYOFASSETS_API_KEY || '';
     const model = 'openai/gpt-4o-mini';
     
     const aiResponse = await generateText(apiKey, prompt, model);

@@ -128,8 +128,7 @@ function extractJson(text: string): any | null {
   }
 }
 
-async function callOpenRouter(prompt: string, maxTokens: number): Promise<any> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+async function callOpenRouter(prompt: string, maxTokens: number, apiKey: string): Promise<any> {
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is not configured.');
 
   const model = process.env.OPENROUTER_EMAIL_MODEL || 'openai/gpt-4o-mini';
@@ -202,7 +201,13 @@ function normalizeEmail(raw: any, lead: any, fallbackStep: number, days: number[
 }
 
 // Generate the full sequence (all steps) for one lead.
-export async function generateSequenceForLead(campaign: any, lead: any, senderName: string, count: number): Promise<GeneratedEmail[]> {
+export async function generateSequenceForLead(
+  campaign: any,
+  lead: any,
+  senderName: string,
+  count: number,
+  openRouterApiKey: string
+): Promise<GeneratedEmail[]> {
   const hiring = isHiringTrack(lead);
   const days = trackDays(hiring, count);
 
@@ -224,7 +229,7 @@ ${schemaLines}
   let lastError: any = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const parsed = await callOpenRouter(prompt, 700 * count + 500);
+      const parsed = await callOpenRouter(prompt, 700 * count + 500, openRouterApiKey);
       const rawEmails = Array.isArray(parsed?.emails) ? parsed.emails : [];
       const emails = rawEmails
         .map((e: any, i: number) => normalizeEmail(e, lead, i + 1, days, count))
@@ -245,7 +250,8 @@ export async function regenerateStepForLead(
   senderName: string,
   step: number,
   count: number,
-  existingEmails: { sequenceStep: number; subject: string; body: string }[]
+  existingEmails: { sequenceStep: number; subject: string; body: string }[],
+  openRouterApiKey: string
 ): Promise<GeneratedEmail> {
   const hiring = isHiringTrack(lead);
   const days = trackDays(hiring, count);
@@ -271,7 +277,7 @@ Return ONLY this JSON (lowercase keys):
   let lastError: any = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const parsed = await callOpenRouter(prompt, 1200);
+      const parsed = await callOpenRouter(prompt, 1200, openRouterApiKey);
       const raw = parsed?.emails?.[0] ?? parsed;
       const email = normalizeEmail(raw, lead, step, days, count);
       if (email) return { ...email, step };

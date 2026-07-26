@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Loader2, Mail, Users, Check, RefreshCw, Save, AlertTriangle, CheckCircle2, X, Search, Pencil, MessageSquare, Send } from "lucide-react";
+import { Loader2, Mail, Users, Check, RefreshCw, Save, AlertTriangle, CheckCircle2, X, Search, Pencil, MessageSquare, Send, ArrowLeft } from "lucide-react";
 import { extractLatestReplyText } from "@/lib/email/strip-quoted-reply";
 
 export default function CampaignDetailPage() {
@@ -266,10 +266,19 @@ export default function CampaignDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-end">
-        <div>
-          <h2 className="text-3xl font-bold text-white mb-2">Campaign Details</h2>
-          <p className="text-slate-400">Review leads and their AI-generated email sequences.</p>
+      <div>
+        <Link
+          href="/dashboard/ai-email-agent"
+          className="inline-flex items-center text-slate-400 hover:text-white transition-colors mb-4"
+        >
+          <ArrowLeft size={16} className="mr-2" />
+          Back to Campaigns
+        </Link>
+        <div className="flex justify-between items-end">
+          <div>
+            <h2 className="text-3xl font-bold text-white mb-2">Campaign Details</h2>
+            <p className="text-slate-400">Review leads and their AI-generated email sequences.</p>
+          </div>
         </div>
       </div>
 

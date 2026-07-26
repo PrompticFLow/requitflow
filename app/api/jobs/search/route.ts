@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { generateText } from '@/services/bayofassets';
 import { runApifyActor } from '@/lib/hiring/apify';
 import { normalizeApifyJob } from '@/lib/hiring/normalization';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 // Increase max duration to allow Apify actors to finish
 export const maxDuration = 300;
@@ -13,6 +14,23 @@ export async function POST(req: Request) {
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    let apifyToken: string;
+    try {
+      apifyToken = await resolveUserApiKey(user.id, 'apify');
+    } catch (e: any) {
+      if (e instanceof ByokKeyMissingError) {
+        return NextResponse.json({ error: e.message }, { status: 400 });
+      }
+      throw e;
+    }
+
+    let bayOfAssetsKey: string | null = null;
+    try {
+      bayOfAssetsKey = await resolveUserApiKey(user.id, 'bayofassets');
+    } catch (e: any) {
+      if (!(e instanceof ByokKeyMissingError)) throw e;
     }
 
     const body = await req.json();
@@ -29,11 +47,6 @@ export async function POST(req: Request) {
       datePosted
     } = body;
 
-    const token = process.env.APIFY_API_TOKEN;
-    if (!token) {
-      return NextResponse.json({ error: 'Apify API token is not configured.' }, { status: 500 });
-    }
-
     // Determine default source. Using linkedin as fallback if not specified
     const source = 'linkedin';
     let rawJobs = [];
@@ -41,7 +54,7 @@ export async function POST(req: Request) {
 
     // Run Apify Actor
     try {
-      rawJobs = await runApifyActor(source, jobTitle || '', location || '', country || '', resultsPerPage);
+      rawJobs = await runApifyActor(source, jobTitle || '', location || '', country || '', resultsPerPage, apifyToken);
       normalizedJobs = rawJobs.map((j: any) => normalizeApifyJob(j, source)).filter(j => j.title !== 'Unknown Title');
     } catch (apifyError: any) {
       console.error("Apify search failed:", apifyError);
@@ -155,7 +168,6 @@ export async function POST(req: Request) {
     }
     
     // AI Analysis (limited to top 3 to prevent timeouts)
-    const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
     if (bayOfAssetsKey && finalJobs.length > 0) {
        await Promise.all(finalJobs.slice(0, 3).map(async (job) => {
           try {

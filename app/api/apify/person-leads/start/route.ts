@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { buildPersonBulkSearchInput } from '@/lib/apify/person-bulk-search-input';
 import { startApifyActorRun } from '@/lib/apify/client';
 import { prisma } from '@/lib/prisma';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export async function POST(req: Request) {
   try {
@@ -11,12 +12,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const APIFY_API_TOKEN = process.env.APIFY_API_TOKEN;
-    const PERSON_BULK_SEARCH_ACTOR_ID = process.env.PERSON_BULK_SEARCH_ACTOR_ID || process.env.PERSON_VALID_LEADS_ACTOR_ID;
-
-    if (!APIFY_API_TOKEN) {
-      return NextResponse.json({ success: false, error: 'AI Agent data source is not connected.', technicalError: 'APIFY_API_TOKEN is missing.' }, { status: 500 });
+    let APIFY_API_TOKEN: string;
+    try {
+      APIFY_API_TOKEN = await resolveUserApiKey(user.id, 'apify');
+    } catch (e: any) {
+      if (e instanceof ByokKeyMissingError) {
+        return NextResponse.json({ success: false, error: e.message }, { status: 400 });
+      }
+      throw e;
     }
+
+    const PERSON_BULK_SEARCH_ACTOR_ID = process.env.PERSON_BULK_SEARCH_ACTOR_ID || process.env.PERSON_VALID_LEADS_ACTOR_ID;
 
     if (!PERSON_BULK_SEARCH_ACTOR_ID) {
       return NextResponse.json({ success: false, error: 'AI Agent data source is not configured.', technicalError: 'Missing PERSON_BULK_SEARCH_ACTOR_ID or PERSON_VALID_LEADS_ACTOR_ID.' }, { status: 500 });
@@ -52,7 +58,7 @@ export async function POST(req: Request) {
     let defaultDatasetId = "";
     let runStatus = "";
     try {
-      const runData = await startApifyActorRun(PERSON_BULK_SEARCH_ACTOR_ID, actorInput);
+      const runData = await startApifyActorRun(PERSON_BULK_SEARCH_ACTOR_ID, actorInput, APIFY_API_TOKEN);
       
       if (!runData || !runData.id) {
         return NextResponse.json(

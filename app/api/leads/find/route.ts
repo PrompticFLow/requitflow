@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { searchLeads, type LeadRecord, type DecisionMakerRole } from '@/services/peopledatalabs';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 // PDL searches are fast, but scoring + DB writes can add up on large result sets.
 export const maxDuration = 120;
@@ -34,12 +35,14 @@ export async function POST(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const apiKey = process.env.PDL_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: 'People Data Labs API key missing. Please add PDL_API_KEY to your environment.' },
-      { status: 400 }
-    );
+  let apiKey: string;
+  try {
+    apiKey = await resolveUserApiKey(user.id, 'pdl');
+  } catch (e: any) {
+    if (e instanceof ByokKeyMissingError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    throw e;
   }
 
   let payload: any;

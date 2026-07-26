@@ -133,7 +133,7 @@ Return ONLY valid JSON. Use lowercase keys only.
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const aiContent = await generateAiResponse(prompt + (attempt > 0 ? "\n\nWARNING: Your previous attempt was too similar to previous emails or invalid. Ensure completely unique phrasing and structure." : ""));
+      const aiContent = await generateAiResponse(prompt + (attempt > 0 ? "\n\nWARNING: Your previous attempt was too similar to previous emails or invalid. Ensure completely unique phrasing and structure." : ""), userId);
       let jsonStr = (aiContent || '').trim();
       jsonStr = jsonStr.replace(/```json/gi, '').replace(/```/g, '').trim();
       const startIdx = jsonStr.indexOf('{');

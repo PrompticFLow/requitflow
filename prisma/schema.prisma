@@ -50,6 +50,9 @@ model UserSettings {
   apifyTokenEncrypted      String?
   bayOfAssetsKeyEncrypted  String?
   bayOfAssetsModel         String?
+  openRouterKeyEncrypted   String?
+  neverBounceKeyEncrypted  String?
+  pdlKeyEncrypted          String?
   twilioSidEncrypted       String?
   twilioAuthTokenEncrypted String?
   twilioPhone              String?

@@ -54,7 +54,7 @@ Based on this information, extract and infer the best angles for this campaign. 
   "emailStrategy": "Overall strategy for the 25-step 28-day sequence"
 }`;
 
-  const responseText = await generateAiResponse(prompt);
+  const responseText = await generateAiResponse(prompt, campaign.userId);
   
   try {
     let jsonString = responseText.replace(/```json/g, '').replace(/```/g, '').trim();

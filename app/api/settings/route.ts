@@ -1,7 +1,15 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
-import { encrypt, decrypt } from '@/lib/encryption';
+import { encrypt } from '@/lib/encryption';
+import { getByokConfiguredFlags, isByokEnabled } from '@/lib/byok';
+
+const MASK = '********';
+
+function encryptIfPlain(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value || value === MASK) return undefined;
+  return encrypt(value);
+}
 
 export async function GET() {
   const user = await getCurrentUser();
@@ -11,17 +19,30 @@ export async function GET() {
     where: { userId: user.id }
   });
 
-  if (!settings) return NextResponse.json({ settings: {} });
+  const configured = await getByokConfiguredFlags(user.id);
+  const isByok = isByokEnabled();
 
-  // Only return masked or safe versions of secrets
+  if (!settings) {
+    return NextResponse.json({
+      isByok,
+      configured,
+      settings: {},
+    });
+  }
+
   return NextResponse.json({
+    isByok,
+    configured,
     settings: {
       ...settings,
-      apifyTokenEncrypted: settings.apifyTokenEncrypted ? '********' : null,
-      bayOfAssetsKeyEncrypted: settings.bayOfAssetsKeyEncrypted ? '********' : null,
-      twilioSidEncrypted: settings.twilioSidEncrypted ? '********' : null,
-      twilioAuthTokenEncrypted: settings.twilioAuthTokenEncrypted ? '********' : null,
-      smtpPassEncrypted: settings.smtpPassEncrypted ? '********' : null,
+      apifyTokenEncrypted: settings.apifyTokenEncrypted ? MASK : null,
+      bayOfAssetsKeyEncrypted: settings.bayOfAssetsKeyEncrypted ? MASK : null,
+      openRouterKeyEncrypted: settings.openRouterKeyEncrypted ? MASK : null,
+      neverBounceKeyEncrypted: settings.neverBounceKeyEncrypted ? MASK : null,
+      pdlKeyEncrypted: settings.pdlKeyEncrypted ? MASK : null,
+      twilioSidEncrypted: settings.twilioSidEncrypted ? MASK : null,
+      twilioAuthTokenEncrypted: settings.twilioAuthTokenEncrypted ? MASK : null,
+      smtpPassEncrypted: settings.smtpPassEncrypted ? MASK : null,
     }
   });
 }
@@ -31,28 +52,35 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const data = await req.json();
+  const updateData: Record<string, unknown> = { ...data };
 
-  // Encrypt secrets if they are provided and not masked
-  const updateData: any = { ...data };
-  
-  if (data.apifyTokenEncrypted && data.apifyTokenEncrypted !== '********') {
-    updateData.apifyTokenEncrypted = encrypt(data.apifyTokenEncrypted);
-  } else {
-    delete updateData.apifyTokenEncrypted;
+  // Never persist masked placeholders; only encrypt fresh plaintext secrets.
+  const secretFields = [
+    'apifyTokenEncrypted',
+    'bayOfAssetsKeyEncrypted',
+    'openRouterKeyEncrypted',
+    'neverBounceKeyEncrypted',
+    'pdlKeyEncrypted',
+    'twilioSidEncrypted',
+    'twilioAuthTokenEncrypted',
+    'smtpPassEncrypted',
+  ] as const;
+
+  for (const field of secretFields) {
+    const encrypted = encryptIfPlain(data[field]);
+    if (encrypted) updateData[field] = encrypted;
+    else delete updateData[field];
   }
 
-  if (data.bayOfAssetsKeyEncrypted && data.bayOfAssetsKeyEncrypted !== '********') {
-    updateData.bayOfAssetsKeyEncrypted = encrypt(data.bayOfAssetsKeyEncrypted);
-  } else {
-    delete updateData.bayOfAssetsKeyEncrypted;
-  }
-  
-  // Similar for others
-  if (data.twilioSidEncrypted && data.twilioSidEncrypted !== '********') updateData.twilioSidEncrypted = encrypt(data.twilioSidEncrypted); else delete updateData.twilioSidEncrypted;
-  if (data.twilioAuthTokenEncrypted && data.twilioAuthTokenEncrypted !== '********') updateData.twilioAuthTokenEncrypted = encrypt(data.twilioAuthTokenEncrypted); else delete updateData.twilioAuthTokenEncrypted;
-  if (data.smtpPassEncrypted && data.smtpPassEncrypted !== '********') updateData.smtpPassEncrypted = encrypt(data.smtpPassEncrypted); else delete updateData.smtpPassEncrypted;
+  // Strip response-only fields if clients echo them back
+  delete updateData.id;
+  delete updateData.userId;
+  delete updateData.createdAt;
+  delete updateData.updatedAt;
+  delete updateData.isByok;
+  delete updateData.configured;
 
-  const settings = await prisma.userSettings.upsert({
+  await prisma.userSettings.upsert({
     where: { userId: user.id },
     update: updateData,
     create: { userId: user.id, ...updateData }

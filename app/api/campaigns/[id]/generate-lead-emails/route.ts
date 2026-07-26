@@ -7,6 +7,7 @@ import {
   generateSequenceForLead,
   regenerateStepForLead,
 } from '@/services/email-sequence-generator';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export const maxDuration = 300;
 
@@ -23,6 +24,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id: campaignId } = await params;
+
+  let openRouterApiKey: string;
+  try {
+    openRouterApiKey = await resolveUserApiKey(user.id, 'openrouter');
+  } catch (e: any) {
+    if (e instanceof ByokKeyMissingError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    throw e;
+  }
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -51,7 +62,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         orderBy: { sequenceStep: 'asc' }
       });
 
-      const generated = await regenerateStepForLead(campaign, lead, senderName, stepNum, stepCount, existing);
+      const generated = await regenerateStepForLead(campaign, lead, senderName, stepNum, stepCount, existing, openRouterApiKey);
 
       const target = existing.find(e => e.sequenceStep === stepNum);
       const data = {
@@ -110,7 +121,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
         if (missingSteps.length === 0) return { skipped: true };
 
-        const emails = await generateSequenceForLead(campaign, lead, senderName, stepCount);
+        const emails = await generateSequenceForLead(campaign, lead, senderName, stepCount, openRouterApiKey);
 
         let created = 0;
         for (const email of emails) {
@@ -181,9 +192,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     });
   } catch (error: any) {
     console.error('Generate lead emails error:', error);
-    const msg = error?.message === 'OPENROUTER_API_KEY is not configured.'
-      ? 'OpenRouter is not connected. Add OPENROUTER_API_KEY to your .env file and restart the server.'
-      : (error?.message || 'Email generation failed. Please try again.');
+    const msg = error?.message || 'Email generation failed. Please try again.';
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

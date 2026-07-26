@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export async function POST(req: Request) {
   try {
@@ -61,7 +62,12 @@ export async function POST(req: Request) {
     }
 
     // Call OpenRouter for Analysis
-    const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
+    let bayOfAssetsKey: string | null = null;
+    try {
+      bayOfAssetsKey = await resolveUserApiKey(user.id, 'bayofassets');
+    } catch (e: any) {
+      if (!(e instanceof ByokKeyMissingError)) throw e;
+    }
     let structuredData = null;
     let status = 'Pending AI Analysis';
     

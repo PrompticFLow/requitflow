@@ -1,18 +1,24 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
-import { decrypt } from '@/lib/encryption';
 import { generateText } from '@/services/bayofassets';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const settings = await prisma.userSettings.findUnique({ where: { userId: user.id } });
-  const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
-  if (!bayOfAssetsKey) {
-    return NextResponse.json({ error: 'Bay of Assets key missing in environment variables' }, { status: 400 });
+  let bayOfAssetsKey: string;
+  try {
+    bayOfAssetsKey = await resolveUserApiKey(user.id, 'bayofassets');
+  } catch (e: any) {
+    if (e instanceof ByokKeyMissingError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    throw e;
   }
+
+  const settings = await prisma.userSettings.findUnique({ where: { userId: user.id } });
   
   const { campaignId, leadId } = await req.json();
 

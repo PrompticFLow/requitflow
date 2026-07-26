@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { runApifyActor } from '@/lib/hiring/apify';
 import { normalizeApifyJob } from '@/lib/hiring/normalization';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 // Allow up to 5 minutes for Apify actor runs (Vercel Pro/Hobby max)
 export const maxDuration = 300;
@@ -12,9 +13,18 @@ const ALL_SOURCES = ['linkedin', 'indeed', 'google_jobs', 'remote_jobs', 'world_
 
 export async function GET() {
   try {
-    const token = process.env.APIFY_API_TOKEN;
-    if (!token) {
-      return NextResponse.json({ status: 'Apify is not connected. Add APIFY_API_TOKEN in environment variables.' });
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ status: 'Unauthorized' }, { status: 401 });
+    }
+
+    try {
+      await resolveUserApiKey(user.id, 'apify');
+    } catch (e: any) {
+      if (e instanceof ByokKeyMissingError) {
+        return NextResponse.json({ status: e.message });
+      }
+      throw e;
     }
 
     return NextResponse.json({
@@ -165,6 +175,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Unauthorized. Please log in again.' }, { status: 401 });
     }
 
+    let apifyToken: string;
+    try {
+      apifyToken = await resolveUserApiKey(user.id, 'apify');
+    } catch (e: any) {
+      if (e instanceof ByokKeyMissingError) {
+        return NextResponse.json({ success: false, error: e.message }, { status: 400 });
+      }
+      throw e;
+    }
+
     const body = await req.json();
     const { source, keyword, location, country, maxResults: rawMaxResults } = body;
 
@@ -201,7 +221,7 @@ export async function POST(req: Request) {
       // Run all configured actors in parallel
       const perSourceResults = await Promise.allSettled(
         sourceList.map(async (src) => {
-          const raw = await runApifyActor(src, keyword, location || '', country || '', maxResults);
+          const raw = await runApifyActor(src, keyword, location || '', country || '', maxResults, apifyToken);
           const normalized = normalizeSource(raw, src);
           return { source: src, rawCount: raw.length, normalizedCount: normalized.length, normalized };
         })
@@ -249,7 +269,7 @@ export async function POST(req: Request) {
     // ── SINGLE SOURCE ─────────────────────────────────────────────────────────
     let rawJobs: any[] = [];
     try {
-      rawJobs = await runApifyActor(source, keyword, location || '', country || '', maxResults);
+      rawJobs = await runApifyActor(source, keyword, location || '', country || '', maxResults, apifyToken);
     } catch (e: any) {
       return NextResponse.json({ success: false, error: e.message || 'Apify job sync failed.' }, { status: 500 });
     }

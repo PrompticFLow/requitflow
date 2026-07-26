@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { researchHiring } from '@/services/hiring-research';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export const maxDuration = 60;
 
@@ -14,8 +15,14 @@ export async function POST(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  if (!process.env.OPENROUTER_API_KEY) {
-    return NextResponse.json({ error: 'Hiring research is not configured (missing OpenRouter API key).' }, { status: 500 });
+  let openRouterApiKey: string;
+  try {
+    openRouterApiKey = await resolveUserApiKey(user.id, 'openrouter');
+  } catch (e: any) {
+    if (e instanceof ByokKeyMissingError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    throw e;
   }
 
   try {
@@ -57,7 +64,7 @@ export async function POST(req: Request) {
       const batch = pending.slice(i, i + CONCURRENCY);
       const batchResults = await Promise.all(batch.map(async lead => ({
         id: lead.id,
-        result: await researchHiring(lead),
+        result: await researchHiring(lead, openRouterApiKey),
       })));
       results.push(...batchResults);
     }

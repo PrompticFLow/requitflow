@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { getJobBoardApiKey } from '@/lib/jobBoard';
 import { generateText } from '@/services/bayofassets';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
@@ -73,7 +74,12 @@ export async function POST(req: Request) {
 
   // 4. AI Scoring Logic
   const settings = await prisma.userSettings.findUnique({ where: { userId: user.id } });
-  const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
+  let bayOfAssetsKey: string | null = null;
+  try {
+    bayOfAssetsKey = await resolveUserApiKey(user.id, 'bayofassets');
+  } catch (e: any) {
+    if (!(e instanceof ByokKeyMissingError)) throw e;
+  }
 
   const processedCandidates = [];
 

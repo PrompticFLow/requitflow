@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { generateSevenStepSequence } from '@/lib/campaign-generator';
 import { recommendNextSendTime } from '@/lib/scheduling';
 import { calculateBestSendTime } from '@/lib/email/best-send-time';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -26,9 +27,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
     }
 
-    const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY || campaign.user.settings?.bayOfAssetsKeyEncrypted;
-    if (!bayOfAssetsKey) {
-      return NextResponse.json({ error: 'Bay of Assets API key missing' }, { status: 400 });
+    let bayOfAssetsKey: string;
+    try {
+      bayOfAssetsKey = await resolveUserApiKey(campaign.userId, 'bayofassets');
+    } catch (e: any) {
+      if (e instanceof ByokKeyMissingError) {
+        return NextResponse.json({ error: e.message }, { status: 400 });
+      }
+      throw e;
     }
 
     // Process in batches of 10

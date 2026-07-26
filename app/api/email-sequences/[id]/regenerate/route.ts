@@ -1,19 +1,22 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
-  const bayOfAssetsModel = process.env.BAYOFASSETS_MODEL || 'google/gemini-2.5-flash';
-
-  if (!bayOfAssetsKey) {
-    return NextResponse.json({
-      error: 'AI service is not configured. Please add your OpenRouter API key in Settings.'
-    }, { status: 400 });
+  let bayOfAssetsKey: string;
+  try {
+    bayOfAssetsKey = await resolveUserApiKey(user.id, 'bayofassets');
+  } catch (e: any) {
+    if (e instanceof ByokKeyMissingError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    throw e;
   }
+  const bayOfAssetsModel = process.env.BAYOFASSETS_MODEL || 'google/gemini-2.5-flash';
 
   try {
     const { id } = await params;

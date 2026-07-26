@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export async function POST(
   req: Request,
@@ -10,6 +11,16 @@ export async function POST(
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    let bayOfAssetsKey: string;
+    try {
+      bayOfAssetsKey = await resolveUserApiKey(user.id, 'bayofassets');
+    } catch (e: any) {
+      if (e instanceof ByokKeyMissingError) {
+        return NextResponse.json({ error: e.message }, { status: 400 });
+      }
+      throw e;
     }
 
     const { id } = await params;
@@ -23,12 +34,7 @@ export async function POST(
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     }
 
-    const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
     const model = process.env.BAYOFASSETS_MODEL || 'google/gemini-2.5-flash';
-
-    if (!bayOfAssetsKey) {
-      return NextResponse.json({ error: 'Bay of Assets API key is not configured.' }, { status: 500 });
-    }
 
     const prompt = `You are an expert recruitment researcher and job-listing analyst.
 

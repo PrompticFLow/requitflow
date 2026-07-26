@@ -68,9 +68,9 @@ function buildActorInput(source: string, keyword: string, location: string, coun
   }
 }
 
-export async function runApifyActor(source: string, keyword: string, location: string, country: string, maxResults: number): Promise<any[]> {
-  const token = process.env.APIFY_API_TOKEN;
-  if (!token) {
+export async function runApifyActor(source: string, keyword: string, location: string, country: string, maxResults: number, token?: string): Promise<any[]> {
+  const resolvedToken = token || process.env.APIFY_API_TOKEN;
+  if (!resolvedToken) {
     throw new Error('Apify is not connected. Add APIFY_API_TOKEN in environment variables.');
   }
 
@@ -116,7 +116,7 @@ export async function runApifyActor(source: string, keyword: string, location: s
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${resolvedToken}`
       },
       body: JSON.stringify(input)
     }
@@ -144,7 +144,7 @@ export async function runApifyActor(source: string, keyword: string, location: s
     attempts++;
 
     const statusResponse = await fetch(`https://api.apify.com/v2/actor-runs/${runId}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: { 'Authorization': `Bearer ${resolvedToken}` }
     });
 
     if (!statusResponse.ok) continue;
@@ -168,7 +168,7 @@ export async function runApifyActor(source: string, keyword: string, location: s
   // Fetch dataset items
   const datasetResponse = await fetch(
     `https://api.apify.com/v2/datasets/${datasetId}/items?limit=${safeMaxResults}`,
-    { headers: { 'Authorization': `Bearer ${token}` } }
+    { headers: { 'Authorization': `Bearer ${resolvedToken}` } }
   );
 
   if (!datasetResponse.ok) {

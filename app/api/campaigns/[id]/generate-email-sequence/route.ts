@@ -310,7 +310,7 @@ If the model cannot generate, return: {"emails": []}`;
 
         while (attempt < 2 && !success) {
           try {
-            aiContent = await generateAiResponse(currentPrompt);
+            aiContent = await generateAiResponse(currentPrompt, user.id);
           } catch (apiError: any) {
             throw apiError;
           }

@@ -344,7 +344,7 @@ Output ONLY valid JSON matching this schema:
 }`;
 
     try {
-      const aiResponse = await generateAiResponse(prompt);
+      const aiResponse = await generateAiResponse(prompt, matchedUser.id);
       let jsonStr = (aiResponse || '').trim();
       if (jsonStr.startsWith('```json')) jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
       if (jsonStr.startsWith('```')) jsonStr = jsonStr.replace(/```/g, '').trim();

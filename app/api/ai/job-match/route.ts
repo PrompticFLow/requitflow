@@ -1,12 +1,23 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export async function POST(req: Request) {
   try {
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    let bayOfAssetsKey: string;
+    try {
+      bayOfAssetsKey = await resolveUserApiKey(user.id, 'bayofassets');
+    } catch (e: any) {
+      if (e instanceof ByokKeyMissingError) {
+        return NextResponse.json({ error: e.message }, { status: 400 });
+      }
+      throw e;
     }
 
     const { candidateProfileId, jobId } = await req.json();
@@ -28,12 +39,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Candidate or Job not found.' }, { status: 404 });
     }
 
-    const bayOfAssetsKey = process.env.BAYOFASSETS_API_KEY;
     const model = process.env.BAYOFASSETS_MODEL || 'google/gemini-2.5-flash';
-
-    if (!bayOfAssetsKey) {
-      return NextResponse.json({ error: 'Bay of Assets API key is not configured.' }, { status: 500 });
-    }
 
     const prompt = `You are an expert AI recruiter matching a candidate to a job opening.
 

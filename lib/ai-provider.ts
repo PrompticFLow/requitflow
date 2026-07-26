@@ -1,14 +1,31 @@
-export async function generateAiResponse(prompt: string): Promise<any> {
+import { isByokEnabled, resolveUserApiKey } from '@/lib/byok';
+
+export async function generateAiResponse(prompt: string, userId?: string): Promise<any> {
   const providerRaw = (process.env.AI_PROVIDER || '').trim().toLowerCase();
   let provider = 'bayofassets';
   if (providerRaw === 'google') provider = 'google';
-  // Default to OpenRouter whenever its key is configured (unless explicitly overridden)
-  if (providerRaw === 'openrouter' || (!providerRaw && process.env.OPENROUTER_API_KEY)) provider = 'openrouter';
+  // Default to OpenRouter when explicitly set, when BYOK (users bring OpenRouter keys),
+  // or when a server OpenRouter key is present.
+  if (
+    providerRaw === 'openrouter' ||
+    (!providerRaw && (isByokEnabled() || !!process.env.OPENROUTER_API_KEY))
+  ) {
+    provider = 'openrouter';
+  }
 
   if (provider === 'openrouter') {
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!userId && isByokEnabled()) {
+      throw new Error('Add your OpenRouter API key in Settings.');
+    }
+    const apiKey = userId
+      ? await resolveUserApiKey(userId, 'openrouter')
+      : (process.env.OPENROUTER_API_KEY || '');
     if (!apiKey) {
-      throw new Error('OPENROUTER_API_KEY is not configured.');
+      throw new Error(
+        isByokEnabled()
+          ? 'Add your OpenRouter API key in Settings.'
+          : 'OPENROUTER_API_KEY is not configured.'
+      );
     }
 
     const model = process.env.OPENROUTER_MODEL || process.env.OPENROUTER_EMAIL_MODEL || 'openai/gpt-4o-mini';
@@ -92,9 +109,18 @@ export async function generateAiResponse(prompt: string): Promise<any> {
 
     return content;
   } else if (provider === 'bayofassets') {
-    const apiKey = process.env.BAYOFASSETS_API_KEY;
+    if (!userId && isByokEnabled()) {
+      throw new Error('Add your Bay of Assets API key in Settings.');
+    }
+    const apiKey = userId
+      ? await resolveUserApiKey(userId, 'bayofassets')
+      : (process.env.BAYOFASSETS_API_KEY || '');
     if (!apiKey) {
-      throw new Error('Bay of Assets API key is not configured.');
+      throw new Error(
+        isByokEnabled()
+          ? 'Add your Bay of Assets API key in Settings.'
+          : 'Bay of Assets API key is not configured.'
+      );
     }
 
     const baseUrl = process.env.BAYOFASSETS_BASE_URL;
@@ -137,9 +163,18 @@ export async function generateAiResponse(prompt: string): Promise<any> {
     return content;
   } else {
     // Default fallback to Bay of Assets
-    const apiKey = process.env.BAYOFASSETS_API_KEY;
+    if (!userId && isByokEnabled()) {
+      throw new Error('Add your Bay of Assets API key in Settings.');
+    }
+    const apiKey = userId
+      ? await resolveUserApiKey(userId, 'bayofassets')
+      : (process.env.BAYOFASSETS_API_KEY || '');
     if (!apiKey) {
-      throw new Error('Bay of Assets API key is not configured.');
+      throw new Error(
+        isByokEnabled()
+          ? 'Add your Bay of Assets API key in Settings.'
+          : 'Bay of Assets API key is not configured.'
+      );
     }
 
     const baseUrl = process.env.BAYOFASSETS_BASE_URL || 'https://api.bayofassets.com';

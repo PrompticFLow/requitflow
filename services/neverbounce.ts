@@ -16,22 +16,16 @@ export type VerificationResult = {
   error?: string;
 };
 
-function apiKey(): string {
-  const key = process.env.NEVERBOUNCE_API_KEY;
-  if (!key) throw new Error('NEVERBOUNCE_API_KEY is not configured');
-  return key;
-}
-
 /**
  * Verify a single email. NeverBounce returns HTTP 200 even for failures, so the
  * `status` field in the body is what decides success.
  */
-export async function verifyEmail(email: string): Promise<VerificationResult> {
+export async function verifyEmail(email: string, apiKey: string): Promise<VerificationResult> {
   try {
     const res = await fetch(`${API_BASE}/single/check`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ key: apiKey(), email }),
+      body: new URLSearchParams({ key: apiKey, email }),
     });
 
     const data = await res.json();
@@ -52,14 +46,18 @@ export async function verifyEmail(email: string): Promise<VerificationResult> {
 }
 
 /** Verify many emails with a bounded number of in-flight requests. */
-export async function verifyEmails(emails: string[], concurrency = 5): Promise<VerificationResult[]> {
+export async function verifyEmails(
+  emails: string[],
+  apiKey: string,
+  concurrency = 5
+): Promise<VerificationResult[]> {
   const results: VerificationResult[] = new Array(emails.length);
   let cursor = 0;
 
   const worker = async () => {
     while (cursor < emails.length) {
       const i = cursor++;
-      results[i] = await verifyEmail(emails[i]);
+      results[i] = await verifyEmail(emails[i], apiKey);
     }
   };
 
@@ -68,11 +66,11 @@ export async function verifyEmails(emails: string[], concurrency = 5): Promise<V
 }
 
 /** Remaining credits, so the UI can warn before burning a batch. */
-export async function getAccountInfo() {
+export async function getAccountInfo(apiKey: string) {
   const res = await fetch(`${API_BASE}/account/info`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ key: apiKey() }),
+    body: new URLSearchParams({ key: apiKey }),
   });
   return res.json();
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { verifyEmails } from '@/services/neverbounce';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export const maxDuration = 60;
 
@@ -9,8 +10,14 @@ export async function POST(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  if (!process.env.NEVERBOUNCE_API_KEY) {
-    return NextResponse.json({ error: 'Email verification is not configured.' }, { status: 500 });
+  let neverbounceKey: string;
+  try {
+    neverbounceKey = await resolveUserApiKey(user.id, 'neverbounce');
+  } catch (e: any) {
+    if (e instanceof ByokKeyMissingError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    throw e;
   }
 
   try {
@@ -51,7 +58,7 @@ export async function POST(req: Request) {
     const emailToLead = new Map<string, string>(); // lowercased email -> original casing sent
     for (const l of pending) emailToLead.set((l.email as string).toLowerCase(), l.email as string);
 
-    const results = await verifyEmails(uniqueEmails.map(e => emailToLead.get(e) as string));
+    const results = await verifyEmails(uniqueEmails.map(e => emailToLead.get(e) as string), neverbounceKey);
 
     // Map each unique email to its result, then fan out to every pending lead.
     const resultByEmail = new Map<string, (typeof results)[number]>();

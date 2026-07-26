@@ -3,15 +3,21 @@ import { getCurrentUser } from '@/lib/auth';
 import { buildContactEnrichmentInput } from '@/lib/apify/person-contact-enrichment-input';
 import { startApifyActorRun } from '@/lib/apify/client';
 import { prisma } from '@/lib/prisma';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export async function POST(req: Request) {
   try {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
-    const apifyToken = process.env.APIFY_API_TOKEN;
-    if (!apifyToken) {
-      return NextResponse.json({ success: false, error: 'API token not configured.' }, { status: 500 });
+    let apifyToken: string;
+    try {
+      apifyToken = await resolveUserApiKey(user.id, 'apify');
+    } catch (e: any) {
+      if (e instanceof ByokKeyMissingError) {
+        return NextResponse.json({ success: false, error: e.message }, { status: 400 });
+      }
+      throw e;
     }
 
     const actorId = process.env.PERSON_CONTACT_ENRICHMENT_ACTOR_ID;
@@ -46,7 +52,7 @@ export async function POST(req: Request) {
     const input = buildContactEnrichmentInput(leadsToEnrich);
     
     // Start enrichment actor
-    const run = await startApifyActorRun(actorId, input);
+    const run = await startApifyActorRun(actorId, input, apifyToken);
 
     return NextResponse.json({
       success: true,

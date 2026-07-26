@@ -4,11 +4,22 @@ import { normalizePersonLead } from '@/lib/person-lead-normalizer';
 import { validatePersonLead } from '@/lib/person-lead-validation';
 import { getApifyRun, getApifyDatasetItems, getApifyRunDatasetItems } from '@/lib/apify/client';
 import { prisma } from '@/lib/prisma';
+import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 
 export async function GET(req: Request) {
   try {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+
+    let apifyToken: string;
+    try {
+      apifyToken = await resolveUserApiKey(user.id, 'apify');
+    } catch (e: any) {
+      if (e instanceof ByokKeyMissingError) {
+        return NextResponse.json({ success: false, error: e.message }, { status: 400 });
+      }
+      throw e;
+    }
 
     const url = new URL(req.url);
     const runId = url.searchParams.get('runId');
@@ -19,7 +30,7 @@ export async function GET(req: Request) {
     let datasetId: string;
 
     try {
-      const data = await getApifyRun(runId);
+      const data = await getApifyRun(runId, apifyToken);
       runStatus = data.status;
       datasetId = data.defaultDatasetId;
     } catch (e: any) {
@@ -56,9 +67,9 @@ export async function GET(req: Request) {
     let rawItems: any[] = [];
     try {
       if (datasetId) {
-        rawItems = await getApifyDatasetItems(datasetId);
+        rawItems = await getApifyDatasetItems(datasetId, apifyToken);
       } else {
-        rawItems = await getApifyRunDatasetItems(runId);
+        rawItems = await getApifyRunDatasetItems(runId, apifyToken);
       }
       
       console.log("PERSON SEARCH DATASET FETCH", {
@@ -167,7 +178,7 @@ export async function GET(req: Request) {
         const { startApifyActorRun } = require('@/lib/apify/client');
         
         const enrichmentInput = buildContactEnrichmentInput(savedLeads);
-        const enrichmentRun = await startApifyActorRun(enrichmentActorId, enrichmentInput);
+        const enrichmentRun = await startApifyActorRun(enrichmentActorId, enrichmentInput, apifyToken);
         
         enrichment = {
           started: true,

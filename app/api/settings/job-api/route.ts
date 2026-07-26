@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
+import { getByokConfiguredFlags, isByokEnabled } from '@/lib/byok';
 
 export async function GET(req: Request) {
   try {
@@ -8,12 +9,15 @@ export async function GET(req: Request) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
+    const isByok = isByokEnabled();
+    const configured = await getByokConfiguredFlags(user.id);
     const hasJobBoard = !!process.env.JOB_BOARD_API_KEY;
-    const hasBayOfAssets = !!process.env.BAYOFASSETS_API_KEY;
+    const hasBayOfAssets = configured.bayofassets;
     const hasNvidia = !!process.env.NVIDIA_API_KEY;
     const activeProvider = process.env.AI_PROVIDER === 'nvidia' ? 'NVIDIA' : 'Bay of Assets';
 
     return NextResponse.json({
+      isByok,
       settings: {
         jobBoardConfigured: hasJobBoard,
         bayOfAssetsConfigured: hasBayOfAssets,
