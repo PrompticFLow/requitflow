@@ -2,18 +2,28 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Loader2, Mail, Users, Check, RefreshCw, Save, AlertTriangle, CheckCircle2, X, Search, Pencil, MessageSquare, Send, ArrowLeft } from "lucide-react";
+import { Loader2, Mail, Users, Check, RefreshCw, Save, AlertTriangle, CheckCircle2, X, Search, Pencil, MessageSquare, Send, ArrowLeft, Calendar, ExternalLink } from "lucide-react";
 import { extractLatestReplyText } from "@/lib/email/strip-quoted-reply";
 
 export default function CampaignDetailPage() {
   const params = useParams();
   const campaignId = params.id as string;
 
-  const [activeTab, setActiveTab] = useState("Leads");
+  const [activeTab, setActiveTab] = useState("Overview");
   const [loading, setLoading] = useState(true);
   const [campaignLeads, setCampaignLeads] = useState<any[]>([]);
   const [campaignData, setCampaignData] = useState<any>(null);
   const [campaignReplies, setCampaignReplies] = useState<any[]>([]);
+  const [bookedMeetings, setBookedMeetings] = useState<any[]>([]);
+
+  // Calendly integration (Overview)
+  const [calendlyStatus, setCalendlyStatus] = useState<{
+    connected: boolean;
+    calendlyEmail?: string;
+    schedulingUrl?: string | null;
+  }>({ connected: false });
+  const [calendlyLoading, setCalendlyLoading] = useState(true);
+  const [applyingCalendlyLink, setApplyingCalendlyLink] = useState(false);
 
   // Gmail Sending Account State
   const [gmailAccounts, setGmailAccounts] = useState<any[]>([]);
@@ -62,6 +72,50 @@ export default function CampaignDetailPage() {
     setSavingBooking(false);
   };
 
+  const handleConnectCalendly = async () => {
+    const returnTo = `/dashboard/campaigns/${campaignId}`;
+    try {
+      const res = await fetch(
+        `/api/integrations/calendly/connect?returnTo=${encodeURIComponent(returnTo)}`,
+        { headers: { Accept: "application/json" } }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Calendly is not configured. Add CALENDLY_* environment variables.");
+        return;
+      }
+      window.location.href = data.url || `/api/integrations/calendly/connect?returnTo=${encodeURIComponent(returnTo)}`;
+    } catch {
+      window.location.href = `/api/integrations/calendly/connect?returnTo=${encodeURIComponent(returnTo)}`;
+    }
+  };
+
+  const handleUseCalendlyLink = async () => {
+    if (!calendlyStatus.schedulingUrl) {
+      return alert("No Calendly scheduling URL available. Pick an event type in Settings.");
+    }
+    setApplyingCalendlyLink(true);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookingLink: calendlyStatus.schedulingUrl,
+          ctaLink: calendlyStatus.schedulingUrl,
+        }),
+      });
+      if (res.ok) {
+        await fetchCampaignData(true);
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to apply Calendly link.");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    setApplyingCalendlyLink(false);
+  };
+
   const handleChangeReplyMode = async (mode: string) => {
     try {
       const res = await fetch(`/api/campaigns/${campaignId}`, {
@@ -100,14 +154,28 @@ export default function CampaignDetailPage() {
   const seqStepCount = campaignData?.emailSequenceCount > 0 ? Math.min(campaignData.emailSequenceCount, 10) : 4;
   const SEQ_STEPS = Array.from({ length: seqStepCount }, (_, i) => i + 1);
 
+  const fetchBookedMeetings = async () => {
+    try {
+      const bookedRes = await fetch(`/api/booked-calls?campaignId=${campaignId}`);
+      if (bookedRes.ok) {
+        const bookedData = await bookedRes.json();
+        setBookedMeetings(bookedData.calls || []);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const fetchCampaignData = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [seqRes, campRes, gmailRes, repliesRes] = await Promise.all([
+      const [seqRes, campRes, gmailRes, repliesRes, bookedRes, calendlyRes] = await Promise.all([
         fetch(`/api/campaigns/${campaignId}/email-sequences`),
         fetch(`/api/campaigns/${campaignId}`),
         fetch(`/api/integrations/gmail/accounts`),
-        fetch(`/api/replies?campaignId=${campaignId}`)
+        fetch(`/api/replies?campaignId=${campaignId}`),
+        fetch(`/api/booked-calls?campaignId=${campaignId}`),
+        fetch(`/api/integrations/calendly/status`),
       ]);
       const seqData = await seqRes.json();
       if (seqData.campaignLeads) setCampaignLeads(seqData.campaignLeads);
@@ -126,14 +194,53 @@ export default function CampaignDetailPage() {
         const repliesData = await repliesRes.json();
         setCampaignReplies(repliesData.replies || []);
       }
+
+      if (bookedRes.ok) {
+        const bookedData = await bookedRes.json();
+        setBookedMeetings(bookedData.calls || []);
+      }
+
+      if (calendlyRes.ok) {
+        const cData = await calendlyRes.json();
+        setCalendlyStatus(cData);
+      }
     } catch(e) {
       console.error(e);
     }
+    setCalendlyLoading(false);
     if (!silent) setLoading(false);
   };
 
   useEffect(() => {
     fetchCampaignData();
+  }, [campaignId]);
+
+  // Pull Calendly → BookedCall when opening this tab (API sync only)
+  useEffect(() => {
+    if (activeTab !== 'Booked Meetings') return;
+    let cancelled = false;
+    (async () => {
+      await fetchBookedMeetings();
+      try {
+        const res = await fetch('/api/integrations/calendly/sync', { method: 'POST' });
+        if (res.ok && !cancelled) await fetchBookedMeetings();
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, campaignId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('calendly') === 'connected') {
+      setActiveTab('Overview');
+      fetchCampaignData(true);
+      window.history.replaceState({}, '', `/dashboard/campaigns/${campaignId}`);
+    }
   }, [campaignId]);
 
   const handleGenerateLeadSequences = async () => {
@@ -262,7 +369,7 @@ export default function CampaignDetailPage() {
     } catch (e) { console.error(e); }
   };
 
-  const tabs = ["Overview", "Leads", "Replies"];
+  const tabs = ["Overview", "Leads", "Replies", "Booked Meetings"];
 
   return (
     <div className="space-y-6">
@@ -289,7 +396,9 @@ export default function CampaignDetailPage() {
             onClick={() => setActiveTab(tab)}
             className={`px-5 py-2.5 font-medium rounded-t-lg transition-colors whitespace-nowrap ${activeTab === tab ? 'bg-purple-600/20 text-purple-400 border-b-2 border-purple-500' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-300'}`}
           >
-            {tab}{tab === 'Replies' && campaignReplies.length > 0 ? ` (${campaignReplies.length})` : ''}
+            {tab}
+            {tab === 'Replies' && campaignReplies.length > 0 ? ` (${campaignReplies.length})` : ''}
+            {tab === 'Booked Meetings' && bookedMeetings.length > 0 ? ` (${bookedMeetings.length})` : ''}
           </button>
         ))}
       </div>
@@ -398,7 +507,48 @@ export default function CampaignDetailPage() {
                      </button>
                    )}
                  </div>
-                 <p className="text-xs text-slate-500 mb-3">AI includes this link in emails and replies so prospects can book a call directly.</p>
+                 <p className="text-xs text-slate-500 mb-3">Connect Calendly via OAuth or paste a scheduling link so AI can include it in emails.</p>
+
+                 {calendlyLoading ? (
+                   <div className="flex justify-center py-3"><Loader2 className="animate-spin text-purple-400" size={18} /></div>
+                 ) : !calendlyStatus.connected ? (
+                   <div className="space-y-3 mb-4">
+                     <button
+                       type="button"
+                       onClick={handleConnectCalendly}
+                       className="w-full px-4 py-2.5 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                     >
+                       <Calendar size={15} /> Connect Calendly
+                     </button>
+                     <p className="text-[11px] text-slate-500 text-center">Or paste a link manually below</p>
+                   </div>
+                 ) : (
+                   <div className="mb-4 p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-2">
+                     <div className="flex items-center justify-between gap-2">
+                       <div>
+                         <span className="text-[10px] uppercase tracking-wide text-emerald-400 font-semibold">Connected</span>
+                         <p className="text-sm text-white">{calendlyStatus.calendlyEmail}</p>
+                       </div>
+                       {calendlyStatus.schedulingUrl && (
+                         <button
+                           type="button"
+                           onClick={handleUseCalendlyLink}
+                           disabled={applyingCalendlyLink}
+                           className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 flex items-center gap-1"
+                         >
+                           {applyingCalendlyLink ? <Loader2 size={12} className="animate-spin" /> : null}
+                           Use Calendly link
+                         </button>
+                       )}
+                     </div>
+                     {calendlyStatus.schedulingUrl && (
+                       <a href={calendlyStatus.schedulingUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:text-blue-300 break-all block">
+                         {calendlyStatus.schedulingUrl}
+                       </a>
+                     )}
+                   </div>
+                 )}
+
                  {editingBooking ? (
                    <div className="space-y-3">
                      <input
@@ -421,11 +571,14 @@ export default function CampaignDetailPage() {
                    </div>
                  ) : (
                    (campaignData?.bookingLink || campaignData?.ctaLink) ? (
-                     <a href={campaignData.bookingLink || campaignData.ctaLink} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-400 hover:text-blue-300 break-all">
-                       {campaignData.bookingLink || campaignData.ctaLink}
-                     </a>
+                     <div>
+                       <p className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Campaign booking link</p>
+                       <a href={campaignData.bookingLink || campaignData.ctaLink} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-400 hover:text-blue-300 break-all">
+                         {campaignData.bookingLink || campaignData.ctaLink}
+                       </a>
+                     </div>
                    ) : (
-                     <p className="text-sm text-slate-500 italic">No booking link set — add your Calendly link so the AI can book calls for you.</p>
+                     <p className="text-sm text-slate-500 italic">No booking link set — connect Calendly or paste a link so the AI can book calls.</p>
                    )
                  )}
                </div>
@@ -584,7 +737,7 @@ export default function CampaignDetailPage() {
            </div>
          </div>
       ) : activeTab === "Leads" ? (
-         <div className="space-y-6">
+         <div className="space-y-6 animate-in fade-in">
            <div className="flex justify-between items-center bg-slate-900/50 p-6 rounded-2xl border border-slate-700/50">
              <div>
                <h3 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
@@ -775,6 +928,11 @@ export default function CampaignDetailPage() {
              </div>
            )}
          </div>
+      ) : activeTab === "Booked Meetings" ? (
+        <CampaignBookedMeetingsTab
+          meetings={bookedMeetings}
+          onRefresh={fetchBookedMeetings}
+        />
       ) : (
         <CampaignRepliesTab
           campaignLeads={campaignLeads}
@@ -820,6 +978,143 @@ function htmlToPlain(text: string): string {
 /** Chat-friendly body: strip HTML and quoted email history. */
 function chatMessageBody(text: string): string {
   return extractLatestReplyText(htmlToPlain(text));
+}
+
+function CampaignBookedMeetingsTab({
+  meetings,
+  onRefresh,
+}: {
+  meetings: any[];
+  onRefresh: () => void;
+}) {
+  const [syncing, setSyncing] = useState(false);
+
+  const contactName = (lead: any) => {
+    if (!lead) return '—';
+    if (lead.fullName?.trim()) return lead.fullName.trim();
+    const parts = [lead.firstName, lead.lastName].filter(Boolean);
+    return parts.length ? parts.join(' ') : lead.email || '—';
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/integrations/calendly/sync', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'Calendly sync failed. Connect Calendly on the Overview tab first.');
+      } else {
+        await onRefresh();
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Calendly sync failed.');
+    }
+    setSyncing(false);
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in">
+      <div className="glass rounded-2xl border border-slate-700/50 overflow-hidden">
+        <div className="p-4 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Calendar size={18} className="text-emerald-400" />
+            <h3 className="text-lg font-bold text-white">Booked Meetings</h3>
+            <span className="text-sm text-slate-500">({meetings.length})</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleSync}
+            disabled={syncing}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {syncing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+            Sync from Calendly
+          </button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm text-slate-300">
+            <thead className="bg-slate-900/50 text-slate-400 border-b border-slate-800">
+              <tr>
+                <th className="px-6 py-4 font-medium">Contact</th>
+                <th className="px-6 py-4 font-medium">Company</th>
+                <th className="px-6 py-4 font-medium">Call Date</th>
+                <th className="px-6 py-4 font-medium">Status</th>
+                <th className="px-6 py-4 font-medium text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              {meetings.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-6 py-16 text-center">
+                    <div className="flex flex-col items-center justify-center">
+                      <div className="w-16 h-16 bg-slate-800/50 text-slate-500 flex items-center justify-center rounded-full mb-4">
+                        <Calendar size={32} />
+                      </div>
+                      <h3 className="text-lg font-medium text-white mb-2">No booked meetings</h3>
+                      <p className="text-slate-400 max-w-sm text-sm">
+                        Meetings booked via Calendly or marked from replies will show up here. Use Sync from Calendly if a booking is missing.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                meetings.map((call) => (
+                  <tr key={call.id} className="hover:bg-slate-800/40 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="font-medium text-white">{contactName(call.lead)}</div>
+                      {call.lead?.email && (
+                        <div className="text-xs text-slate-500">{call.lead.email}</div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-slate-300">
+                      {call.lead?.businessName || '—'}
+                    </td>
+                    <td className="px-6 py-4">
+                      {call.callDate
+                        ? new Date(call.callDate).toLocaleString(undefined, {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: true,
+                          })
+                        : new Date(call.createdAt).toLocaleString(undefined, {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: true,
+                          })}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="px-2 py-1 text-xs rounded-full border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                        {call.status || 'Scheduled'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      {call.lead?.id && (
+                        <Link
+                          href={`/dashboard/leads/${call.lead.id}`}
+                          className="inline-flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300"
+                        >
+                          View lead <ExternalLink size={12} />
+                        </Link>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function CampaignRepliesTab({ campaignLeads, replies, onRefresh }: { campaignLeads: any[], replies: any[], onRefresh: () => void }) {

@@ -1,25 +1,52 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Search, Calendar, ExternalLink, Loader2 } from "lucide-react";
+import { Search, Calendar, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 export default function BookedCallsPage() {
   const [calls, setCalls] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+
+  const fetchCalls = async () => {
+    try {
+      const res = await fetch('/api/booked-calls');
+      const data = await res.json();
+      if (data.calls) setCalls(data.calls);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchCalls = async () => {
+    (async () => {
+      await fetchCalls();
       try {
-        const res = await fetch('/api/booked-calls');
-        const data = await res.json();
-        if (data.calls) setCalls(data.calls);
+        const res = await fetch('/api/integrations/calendly/sync', { method: 'POST' });
+        if (res.ok) await fetchCalls();
       } catch (e) {
         console.error(e);
-      } finally {
-        setLoading(false);
       }
-    };
-    fetchCalls();
+    })();
   }, []);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/integrations/calendly/sync', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'Calendly sync failed. Connect Calendly in Settings first.');
+      } else {
+        await fetchCalls();
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Calendly sync failed.');
+    }
+    setSyncing(false);
+  };
 
   return (
     <div className="space-y-6">
@@ -28,6 +55,15 @@ export default function BookedCallsPage() {
           <h2 className="text-3xl font-bold text-white mb-2">Booked Discovery Calls</h2>
           <p className="text-slate-400">Track all client discovery calls booked through AI campaigns.</p>
         </div>
+        <button
+          type="button"
+          onClick={handleSync}
+          disabled={syncing}
+          className="px-3 py-2 text-sm font-medium rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300 disabled:opacity-50 flex items-center gap-1.5"
+        >
+          {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          Sync from Calendly
+        </button>
       </div>
 
       <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex items-start space-x-3 text-blue-400">
@@ -93,7 +129,19 @@ export default function BookedCallsPage() {
                     <td className="px-6 py-4 text-slate-300">{call.campaign?.name || 'Direct / CRM'}</td>
                     <td className="px-6 py-4 text-blue-400 flex items-center space-x-2 mt-2">
                       <Calendar size={14} />
-                      <span>{call.callDate ? new Date(call.callDate).toLocaleString() : 'TBD'}</span>
+                      <span>
+                        {call.callDate
+                          ? new Date(call.callDate).toLocaleString(undefined, {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                              second: '2-digit',
+                              hour12: true,
+                            })
+                          : 'TBD'}
+                      </span>
                     </td>
                     <td className="px-6 py-4">
                       <span className="text-green-400 text-xs font-medium uppercase">{call.status}</span>

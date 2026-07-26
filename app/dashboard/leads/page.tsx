@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import Link from 'next/link';
-import { Search, Filter, Download, Plus, Trash2, Loader2, Users, X, ChevronDown, ShieldCheck, ShieldQuestion, MailX, Briefcase, Pencil } from "lucide-react";
+import { Search, Filter, Download, Plus, Trash2, Loader2, Users, X, ChevronDown, ChevronLeft, ChevronRight, ShieldCheck, ShieldQuestion, MailX, Briefcase, Pencil } from "lucide-react";
 
 const EMAIL_STATUS_STYLES: Record<string, string> = {
   Valid: 'bg-green-500/20 text-green-400 border-green-500/30',
@@ -89,9 +89,12 @@ export default function LeadDatabasePage() {
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [tierFilter, setTierFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [hiringFilter, setHiringFilter] = useState('All');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 25, total: 0, totalPages: 1 });
   const [deleting, setDeleting] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -122,45 +125,68 @@ export default function LeadDatabasePage() {
   };
   const [newLeadData, setNewLeadData] = useState(emptyLeadForm);
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, tierFilter, statusFilter, hiringFilter]);
+
+  const mapLead = (l: any) => ({
+    id: l.id,
+    name: l.businessName,
+    fullName: l.fullName || null,
+    jobTitle: l.jobTitle || null,
+    email: l.email || null,
+    phone: l.phone || null,
+    website: l.website || null,
+    score: l.leadScore || 0,
+    tier: l.leadTier || "Cold",
+    status: l.status || "New",
+    category: l.category || null,
+    country: l.country || null,
+    emailStatus: l.emailStatus || null,
+    emailVerifiedAt: l.emailVerifiedAt || null,
+    hiringStatus: l.hiringStatus || null,
+    hiringSignal: l.hiringSignal || null,
+    hiringSourceUrl: l.hiringSourceUrl || null,
+    hiringJobCount: l.hiringJobCount ?? null,
+    hiringCheckedAt: l.hiringCheckedAt || null,
+    created: new Date(l.createdAt).toLocaleDateString()
+  });
+
   const fetchLeads = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/leads");
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: '25',
+      });
+      if (debouncedSearch.trim()) params.set('q', debouncedSearch.trim());
+      if (tierFilter !== 'All') params.set('tier', tierFilter);
+      if (statusFilter !== 'All') params.set('status', statusFilter);
+      if (hiringFilter !== 'All') params.set('hiringStatus', hiringFilter);
+
+      const res = await fetch(`/api/leads?${params}`);
       if (res.status === 401) {
         window.location.href = '/login';
         return;
       }
       const data = await res.json();
       if (data.leads) {
-        setLeads(data.leads.map((l: any) => ({
-          id: l.id,
-          name: l.businessName,
-          fullName: l.fullName || null,
-          jobTitle: l.jobTitle || null,
-          email: l.email || null,
-          phone: l.phone || null,
-          website: l.website || null,
-          score: l.leadScore || 0,
-          tier: l.leadTier || "Cold",
-          status: l.status || "New",
-          category: l.category || null,
-          country: l.country || null,
-          emailStatus: l.emailStatus || null,
-          emailVerifiedAt: l.emailVerifiedAt || null,
-          hiringStatus: l.hiringStatus || null,
-          hiringSignal: l.hiringSignal || null,
-          hiringSourceUrl: l.hiringSourceUrl || null,
-          hiringJobCount: l.hiringJobCount ?? null,
-          hiringCheckedAt: l.hiringCheckedAt || null,
-          created: new Date(l.createdAt).toLocaleDateString()
-        })));
+        const mapped = data.leads.map(mapLead);
+        setLeads(mapped);
+        setFiltered(mapped);
       }
+      if (data.pagination) setPagination(data.pagination);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, debouncedSearch, tierFilter, statusFilter, hiringFilter]);
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
@@ -177,32 +203,6 @@ export default function LeadDatabasePage() {
   useEffect(() => {
     fetchCampaigns();
   }, []);
-
-  // Filter leads
-  useEffect(() => {
-    let result = leads;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(l =>
-        (l.name || '').toLowerCase().includes(q) ||
-        (l.email || '').toLowerCase().includes(q) ||
-        (l.phone || '').toLowerCase().includes(q) ||
-        (l.website || '').toLowerCase().includes(q) ||
-        (l.category || '').toLowerCase().includes(q) ||
-        (l.country || '').toLowerCase().includes(q)
-      );
-    }
-    if (tierFilter !== 'All') result = result.filter(l => l.tier === tierFilter);
-    if (statusFilter !== 'All') result = result.filter(l => l.status === statusFilter);
-    if (hiringFilter !== 'All') {
-      if (hiringFilter === 'Not Checked') {
-        result = result.filter(l => !l.hiringCheckedAt);
-      } else {
-        result = result.filter(l => l.hiringCheckedAt && (l.hiringStatus || 'Unknown') === hiringFilter);
-      }
-    }
-    setFiltered(result);
-  }, [leads, search, tierFilter, statusFilter, hiringFilter]);
 
   // Selection
   const toggleSelect = (id: string) => {
@@ -883,12 +883,33 @@ export default function LeadDatabasePage() {
           </table>
         </div>
 
-        {filtered.length > 0 && !loading && (
-          <div className="p-4 border-t border-slate-800 flex justify-between items-center text-sm text-slate-500">
+        {!loading && pagination.total > 0 && (
+          <div className="p-4 border-t border-slate-800 flex flex-col sm:flex-row gap-3 justify-between items-center text-sm text-slate-500">
             <div>
               {someSelected
-                ? `${selectedIds.size} of ${filtered.length} selected`
-                : `Showing ${filtered.length} of ${leads.length} leads`}
+                ? `${selectedIds.size} of ${filtered.length} selected on this page`
+                : `Showing ${pagination.total === 0 ? 0 : (pagination.page - 1) * pagination.pageSize + 1}–${Math.min(pagination.page * pagination.pageSize, pagination.total)} of ${pagination.total} leads`}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 disabled:opacity-40 hover:border-purple-500/50 flex items-center gap-1"
+              >
+                <ChevronLeft size={14} /> Prev
+              </button>
+              <span className="text-slate-400 px-2">
+                Page {pagination.page} of {pagination.totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={page >= pagination.totalPages}
+                onClick={() => setPage((p) => p + 1)}
+                className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 disabled:opacity-40 hover:border-purple-500/50 flex items-center gap-1"
+              >
+                Next <ChevronRight size={14} />
+              </button>
             </div>
           </div>
         )}

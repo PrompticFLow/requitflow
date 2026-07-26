@@ -44,7 +44,6 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       replyInboundRouteExists: true,
-      replyWebhookRouteExists: true,
       emailRepliesCount,
       recentReplies,
       campaignsWithReplies,

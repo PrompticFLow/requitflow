@@ -29,6 +29,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       where: { userId: user.id }
     });
 
+    const calendly = await prisma.calendlyIntegration.findUnique({
+      where: { userId: user.id },
+    });
+    const calendlyBookingLink =
+      calendly?.connected && calendly.schedulingUrl ? calendly.schedulingUrl : null;
+
     const smtpAccount = await prisma.smtpAccount.findUnique({
       where: { userId: user.id }
     });
@@ -46,8 +52,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const missing: string[] = [];
 
-    if (!campaign.bookingLink && !userSettings?.bookingLink) {
+    if (!campaign.bookingLink && !userSettings?.bookingLink && !calendlyBookingLink) {
       missing.push('Booking link is missing');
+    }
+
+    // Prefer Calendly scheduling URL when campaign has no booking link
+    if (!campaign.bookingLink && calendlyBookingLink) {
+      await prisma.campaign.update({
+        where: { id: campaignId },
+        data: { bookingLink: calendlyBookingLink, ctaLink: calendlyBookingLink },
+      });
     }
 
     if (!campaign.unsubscribeLine) {

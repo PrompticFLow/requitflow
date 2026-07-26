@@ -464,6 +464,27 @@ Output ONLY valid JSON matching this schema:
           data: { status: bookedCall ? 'Booked' : (isNegative ? 'Not Interested' : 'Replied') }
         });
       }
+      if (bookedCall) {
+        const existingCall = await prisma.bookedCall.findFirst({
+          where: {
+            userId: matchedUser.id,
+            leadId: matchedLead.id,
+            status: { in: ['Scheduled', 'Confirmed', 'Booked'] },
+          },
+        });
+        if (!existingCall) {
+          await prisma.bookedCall.create({
+            data: {
+              userId: matchedUser.id,
+              leadId: matchedLead.id,
+              campaignId: matchedCampaign?.id || null,
+              callDate: existingSuggestedSlots[detectedSlotIndex - 1]?.start || new Date(),
+              status: 'Booked',
+              notes: 'Auto-booked from reply slot selection',
+            },
+          });
+        }
+      }
     }
   }
 

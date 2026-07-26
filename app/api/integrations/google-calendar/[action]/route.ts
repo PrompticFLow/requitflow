@@ -194,6 +194,30 @@ export async function POST(req: Request, { params }: { params: Promise<{ action:
              where: { campaignId: data.campaignId, leadId: data.leadId, status: { in: ['Draft', 'Pending', 'Scheduled'] } },
              data: { status: 'Skipped' }
            });
+           await prisma.campaignLead.updateMany({
+             where: { campaignId: data.campaignId, leadId: data.leadId },
+             data: { status: 'Booked' },
+           });
+        }
+
+        const existingCall = await prisma.bookedCall.findFirst({
+          where: {
+            userId: user.id,
+            leadId: data.leadId,
+            status: { in: ['Scheduled', 'Confirmed', 'Booked'] },
+          },
+        });
+        if (!existingCall) {
+          await prisma.bookedCall.create({
+            data: {
+              userId: user.id,
+              leadId: data.leadId,
+              campaignId: data.campaignId || null,
+              callDate: new Date(data.start),
+              status: 'Booked',
+              notes: data.summary || 'Booked via Google Calendar',
+            },
+          });
         }
       }
 

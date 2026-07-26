@@ -76,6 +76,17 @@ export default function SettingsPage() {
   const [calendarSaving, setCalendarSaving] = useState(false);
   const [calendarsList, setCalendarsList] = useState<any[]>([]);
 
+  // Calendly State
+  const [calendlyData, setCalendlyData] = useState<{
+    connected: boolean;
+    calendlyEmail?: string;
+    schedulingUrl?: string | null;
+  }>({ connected: false });
+  const [calendlyLoading, setCalendlyLoading] = useState(true);
+  const [calendlyEventTypes, setCalendlyEventTypes] = useState<
+    Array<{ uri: string; name: string; scheduling_url: string }>
+  >([]);
+
   useEffect(() => {
     fetch("/api/settings/job-api")
       .then(res => res.json())
@@ -203,6 +214,24 @@ export default function SettingsPage() {
       })
       .catch(console.error)
       .finally(() => setCalendarLoading(false));
+
+    fetch("/api/integrations/calendly/status")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data) {
+          setCalendlyData(data);
+          if (data.connected) {
+            fetch("/api/integrations/calendly/event-types")
+              .then((r) => r.json())
+              .then((d) => {
+                if (d.eventTypes) setCalendlyEventTypes(d.eventTypes);
+              })
+              .catch(() => {});
+          }
+        }
+      })
+      .catch(console.error)
+      .finally(() => setCalendlyLoading(false));
   }, []);
 
   const handleSaveLanguage = async () => {
@@ -431,6 +460,36 @@ export default function SettingsPage() {
       alert("Google Calendar disconnected.");
     } catch (e) {
       alert("Failed to disconnect calendar.");
+    }
+  };
+
+  const handleDisconnectCalendly = async () => {
+    if (!confirm("Are you sure you want to disconnect Calendly?")) return;
+    try {
+      await fetch("/api/integrations/calendly/disconnect", { method: "POST" });
+      setCalendlyData({ connected: false });
+      setCalendlyEventTypes([]);
+      alert("Calendly disconnected.");
+    } catch (e) {
+      alert("Failed to disconnect Calendly.");
+    }
+  };
+
+  const handleSetCalendlySchedulingUrl = async (schedulingUrl: string) => {
+    try {
+      const res = await fetch("/api/integrations/calendly/set-scheduling-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schedulingUrl }),
+      });
+      if (res.ok) {
+        setCalendlyData((prev) => ({ ...prev, schedulingUrl }));
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to update scheduling URL.");
+      }
+    } catch {
+      alert("Failed to update scheduling URL.");
     }
   };
 
@@ -1030,6 +1089,95 @@ export default function SettingsPage() {
                 <button onClick={handleSaveCalendar} disabled={calendarSaving} className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors shadow-lg flex items-center justify-center gap-2 mt-2">
                   {calendarSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />} Save Calendar Settings
                 </button>
+              </div>
+            )}
+          </div>
+
+          {/* Calendly Integration Card */}
+          <div className="glass p-8 rounded-2xl border border-slate-700/50 space-y-6 break-inside-avoid mb-6">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center space-x-3">
+                <svg className="w-6 h-6 text-blue-300" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm-7-9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+                </svg>
+                <h3 className="text-xl font-bold text-white">Calendly Integration</h3>
+              </div>
+              {calendlyData.connected ? (
+                <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs rounded border border-green-500/30 flex items-center space-x-1">
+                  <Check size={14} /> <span>Connected</span>
+                </span>
+              ) : (
+                <span className="px-2 py-1 bg-slate-500/20 text-slate-400 text-xs rounded border border-slate-500/30">
+                  Not Connected
+                </span>
+              )}
+            </div>
+
+            <p className="text-sm text-slate-400 leading-relaxed mb-4">
+              Connect Calendly to use your scheduling link in campaigns and sync booked meetings into the pipeline automatically.
+            </p>
+
+            {calendlyLoading ? (
+              <div className="flex justify-center py-6"><Loader2 className="animate-spin text-blue-500" /></div>
+            ) : !calendlyData.connected ? (
+              <div className="flex justify-center py-4">
+                <button
+                  onClick={async () => {
+                    try {
+                      const res = await fetch('/api/integrations/calendly/connect', { headers: { Accept: 'application/json' } });
+                      const data = await res.json().catch(() => ({}));
+                      if (!res.ok) {
+                        alert(data.error || "Calendly is not configured. Add CALENDLY_* environment variables.");
+                        return;
+                      }
+                      if (data.url) {
+                        window.location.href = data.url;
+                        return;
+                      }
+                    } catch {
+                      // fall through
+                    }
+                    window.location.href = '/api/integrations/calendly/connect';
+                  }}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors shadow-lg flex items-center gap-2"
+                >
+                  Connect Calendly
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-slate-800/50 p-4 rounded-lg text-sm text-slate-300 border border-slate-700 flex justify-between items-center">
+                  <div>
+                    <span className="block text-xs text-slate-500">Connected Account</span>
+                    <strong className="text-white">{calendlyData.calendlyEmail}</strong>
+                  </div>
+                  <button onClick={handleDisconnectCalendly} className="text-red-400 hover:text-red-300 text-xs">Disconnect</button>
+                </div>
+
+                {calendlyEventTypes.length > 0 && (
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-slate-400">Default Event Type</label>
+                    <select
+                      value={calendlyData.schedulingUrl || ''}
+                      onChange={(e) => handleSetCalendlySchedulingUrl(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-blue-500"
+                    >
+                      <option value="">Select event type…</option>
+                      {calendlyEventTypes.map((et) => (
+                        <option key={et.uri} value={et.scheduling_url}>{et.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {calendlyData.schedulingUrl && (
+                  <div className="text-sm text-slate-400">
+                    Scheduling URL:{" "}
+                    <a href={calendlyData.schedulingUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 break-all">
+                      {calendlyData.schedulingUrl}
+                    </a>
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -40,6 +40,26 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           where: { leadId: reply.leadId, campaignId: reply.campaignId, status: { in: ['Draft', 'Queued', 'Scheduled'] } },
           data: { status: 'Cancelled', errorMessage: 'Stopped because lead booked a call.' }
         });
+        await prisma.campaignLead.updateMany({
+          where: { campaignId: reply.campaignId, leadId: reply.leadId },
+          data: { status: 'Booked' },
+        });
+      }
+
+      const existingCall = await prisma.bookedCall.findFirst({
+        where: { userId: user.id, leadId: reply.leadId, status: { in: ['Scheduled', 'Confirmed', 'Booked'] } },
+      });
+      if (!existingCall) {
+        await prisma.bookedCall.create({
+          data: {
+            userId: user.id,
+            leadId: reply.leadId,
+            campaignId: reply.campaignId,
+            callDate: new Date(),
+            status: 'Booked',
+            notes: 'Marked booked from replies inbox',
+          },
+        });
       }
     }
 

@@ -29,6 +29,7 @@ model User {
   emailReplies              EmailReply[]
   emailSequences            EmailSequence[]
   gmailAccounts             GmailAccount[]
+  calendlyIntegration       CalendlyIntegration?
   googleCalendarIntegration GoogleCalendarIntegration?
   jobApplications           JobApplication[]
   jobSearchHistory          JobSearchHistory[]
@@ -851,6 +852,22 @@ model GoogleCalendarIntegration {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
   user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CalendlyIntegration {
+  id                          String    @id @default(cuid())
+  userId                      String    @unique
+  calendlyUserUri             String?
+  calendlyEmail               String?
+  organizationUri             String?
+  accessTokenEncrypted        String?
+  refreshTokenEncrypted       String?
+  tokenExpiry                 DateTime?
+  schedulingUrl               String?
+  connected                   Boolean   @default(false)
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+  user                        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model SuggestedCalendarSlot {

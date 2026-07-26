@@ -39,6 +39,9 @@ export async function checkCampaignReadyToStart(
   }
 
   const userSettings = await prisma.userSettings.findUnique({ where: { userId } });
+  const calendly = await prisma.calendlyIntegration.findUnique({ where: { userId } });
+  const calendlyLink =
+    calendly?.connected && calendly.schedulingUrl ? calendly.schedulingUrl : null;
 
   // 1. Sender email check: campaign Gmail account, verified SMTP, or SendGrid
   const hasSendGridKey = !!process.env.SENDGRID_API_KEY;
@@ -67,13 +70,14 @@ export async function checkCampaignReadyToStart(
   }
 
   // 2. Booking link (optional — emails fall back to a reply-based CTA without one)
-  const bookingLink = campaign.bookingLink || campaign.ctaLink || userSettings?.bookingLink;
+  const bookingLink =
+    campaign.bookingLink || campaign.ctaLink || userSettings?.bookingLink || calendlyLink;
   const bookingOk = !!(bookingLink && bookingLink.startsWith('http'));
   items.push({
     key: 'bookingLink',
     label: 'Booking link added (optional)',
     passed: bookingOk,
-    actionHint: 'Optional: add a booking link so emails can link to your calendar.'
+    actionHint: 'Optional: add a booking link or connect Calendly so emails can link to your calendar.'
   });
 
   // 3. Unsubscribe: a tracked unsubscribe link is auto-appended to every send

@@ -102,7 +102,7 @@ function looksLikeRfcMessageId(id: string): boolean {
 /**
  * Resolves Gmail threadId + RFC822 Message-ID headers for a stored inbound id.
  * `storedMessageId` may be either a Gmail API message id (from pollGmailAccount)
- * or an RFC822 Message-ID (from IMAP / webhooks).
+ * or an RFC822 Message-ID (from IMAP / inbound email).
  */
 export async function resolveGmailReplyThreading(
   accountId: string,
