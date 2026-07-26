@@ -1,6 +1,5 @@
 import { prisma } from './prisma';
 import { generateAiResponse } from './ai-provider';
-import { getAvailableSlots, bookCalendarEvent } from './google-calendar';
 import { extractLatestReplyText } from './email/strip-quoted-reply';
 import { buildReplySubject } from './email/reply-subject';
 
@@ -231,26 +230,6 @@ export async function handleInboundReply(payload: InboundReplyPayload) {
   let canAutoSend = false;
   let aiSuggestedReplyStr = '';
   let aiReplySubjectStr = buildReplySubject(normalizedSubject, 'Quick question');
-  let detectedSlotIndex = -1;
-
-  // Check Google Calendar Integration
-  let calendarIntegration = null;
-  if (matchedUser) {
-    calendarIntegration = await prisma.googleCalendarIntegration.findUnique({
-      where: { userId: matchedUser.id }
-    });
-  }
-  const isCalendarConnected = calendarIntegration?.connected && matchedCampaign?.bookingMethod !== 'Booking link';
-  let availableSlots: any[] = [];
-  let existingSuggestedSlots: any[] = [];
-
-  if (isCalendarConnected && matchedLead) {
-    // Check if we previously suggested slots
-    existingSuggestedSlots = await prisma.suggestedCalendarSlot.findMany({
-      where: { leadId: matchedLead.id, selected: false },
-      orderBy: { start: 'asc' }
-    });
-  }
 
   // 4. Classify and Generate AI Suggested Reply
   if (matchedLead && matchedCampaign) {
@@ -283,7 +262,6 @@ Campaign Information:
 - Audience: ${matchedCampaign.targetAudience || 'Professionals'}
 - Goal: ${matchedCampaign.goal || 'Book discovery call'}
 - Booking Link: ${bookingLink || 'None'}
-- Calendar Connected: ${isCalendarConnected ? 'Yes' : 'No'}
 - Offer: ${matchedCampaign.offer || 'None'}
 - Main Benefit: ${matchedCampaign.mainBenefit || 'None'}
 - Pain Points: ${matchedCampaign.painPoints || 'None'}
@@ -310,24 +288,19 @@ ${priorReplyContext ? priorReplyContext : 'No prior replies found.'}
 CURRENT REPLY FROM LEAD (new text only — ignore any quoted original email):
 "${latestReplyText}"
 
-Previously Suggested Times (if any):
-${existingSuggestedSlots.map((s, i) => `${i + 1}. ${s.label}`).join('\n')}
-
 INSTRUCTIONS & RULES:
 1. Intent Classification: Classify the reply strictly into one of the following exact strings:
    "Interested", "Wants pricing", "Wants demo", "Wants consultation", "Wants meeting", 
    "Wants more information", "Technical question", "Objection", "Budget concern", "Timing concern",
    "Decision maker issue", "Already using competitor", "Not interested", "Wrong person", 
    "Unsubscribe", "Out of office", "Spam", "Needs follow-up later", "Positive response", "Negative response".
-   - If they picked a previously suggested time, classify as "Wants meeting" and set detectedSlotIndex.
 
 2. Goal: Move toward a booked meeting, but never force it. Answer questions, build trust, handle objections logically based on KB.
 
 3. Human Handoff: If they request a human, the answer requires legal/complex pricing not in KB, or if you are unsure, set "canAutoSend" to false and set "needsHuman" to true.
 
 4. Booking:
-   - If Calendar Connected is Yes and they want to book, DO NOT include the booking link. Instead, we will inject real slots later. Set canAutoSend to true.
-   - If Calendar Connected is No, include the booking link ("${bookingLink}") if they are interested or want booking. Set canAutoSend to true.
+   - Include the booking link ("${bookingLink}") if they are interested or want booking. Set canAutoSend to true.
 
 5. Do NOT invent facts. Keep it concise. Do not reveal system logic.
 
@@ -338,7 +311,6 @@ Output ONLY valid JSON matching this schema:
   "shouldReply": true,
   "canAutoSend": true,
   "needsHuman": false,
-  "detectedSlotIndex": -1,
   "subject": "${buildReplySubject(normalizedSubject, 'Quick question')}",
   "body": "Your generated natural response here..."
 }`;
@@ -360,7 +332,6 @@ Output ONLY valid JSON matching this schema:
         if (parsed.needsHuman) canAutoSend = false; // Override for human handoff
         aiSuggestedReplyStr = parsed.body || '';
         aiReplySubjectStr = buildReplySubject(parsed.subject || aiReplySubjectStr, 'Quick question');
-        detectedSlotIndex = parsed.detectedSlotIndex ?? -1;
       }
     } catch (e) {
       console.error('AI response parsing failed:', e);
@@ -378,61 +349,7 @@ Output ONLY valid JSON matching this schema:
     shouldReply = false;
   }
 
-  let bookedCall = false;
-  let newSuggestedSlots: any[] = [];
-
-  // Google Calendar Integration - Post AI Logic
-  if (isCalendarConnected && matchedLead) {
-    if (classification === 'Selected slot' && detectedSlotIndex >= 1 && existingSuggestedSlots.length >= detectedSlotIndex) {
-      // The AI identified the user selected a slot
-      const selectedSlot = existingSuggestedSlots[detectedSlotIndex - 1];
-      try {
-        await bookCalendarEvent(matchedUser.id, {
-          start: selectedSlot.start,
-          end: selectedSlot.end,
-          summary: `Discovery Call with ${matchedLead.businessName || matchedLead.email}`,
-          description: `Booked from Funnelzen AI Campaign: ${matchedCampaign?.name}`,
-          attendeeEmail: matchedLead.email || ''
-        });
-        
-        // Mark slot as selected
-        await prisma.suggestedCalendarSlot.update({
-          where: { id: selectedSlot.id },
-          data: { selected: true }
-        });
-
-        bookedCall = true;
-        classification = 'Booked'; // Override classification
-        aiSuggestedReplyStr = `Great, you're booked for ${selectedSlot.label}.\n\nI've sent a calendar invite to ${matchedLead.email}. Looking forward to speaking with you.`;
-        canAutoSend = true;
-      } catch (err) {
-        console.error('Failed to book event automatically', err);
-      }
-    } else if (['Wants meeting', 'Interested', 'Wants consultation', 'Wants demo'].includes(classification)) {
-      // Fetch 3 slots and append to AI reply
-      try {
-        const start = new Date();
-        start.setHours(start.getHours() + 2); // Start looking 2 hours from now
-        const end = new Date(start);
-        end.setDate(end.getDate() + 7); // Look up to 7 days ahead
-        
-        availableSlots = await getAvailableSlots(matchedUser.id, {
-          dateRangeStart: start,
-          dateRangeEnd: end,
-          durationMinutes: 30
-        });
-
-        if (availableSlots.length > 0) {
-          const slotsText = availableSlots.slice(0, 3).map((s, i) => `${i + 1}. ${s.label}`).join('\n');
-          aiSuggestedReplyStr = `Perfect — happy to connect.\n\nHere are a few times that are open:\n${slotsText}\n\nWhich one works best for you?`;
-          canAutoSend = true; // Safe to auto-send the slots proposal
-          newSuggestedSlots = availableSlots.slice(0, 3);
-        }
-      } catch (err) {
-        console.error('Failed to get slots', err);
-      }
-    }
-  }
+  const bookedCall = false;
 
   // 5. Update Lead / Unsubscribe status
   if (matchedLead) {
@@ -453,37 +370,16 @@ Output ONLY valid JSON matching this schema:
       await prisma.lead.update({
         where: { id: matchedLead.id },
         data: { 
-          status: bookedCall ? 'Booked' : (isNegative ? 'Not Interested' : 'Replied'),
-          leadTier: bookedCall ? 'Converted' : (isNegative ? 'Cold' : 'Hot'),
+          status: isNegative ? 'Not Interested' : 'Replied',
+          leadTier: isNegative ? 'Cold' : 'Hot',
           leadScore: { increment: 50 }
         }
       });
       if (matchedCampaign) {
         await prisma.campaignLead.updateMany({
           where: { campaignId: matchedCampaign.id, leadId: matchedLead.id },
-          data: { status: bookedCall ? 'Booked' : (isNegative ? 'Not Interested' : 'Replied') }
+          data: { status: isNegative ? 'Not Interested' : 'Replied' }
         });
-      }
-      if (bookedCall) {
-        const existingCall = await prisma.bookedCall.findFirst({
-          where: {
-            userId: matchedUser.id,
-            leadId: matchedLead.id,
-            status: { in: ['Scheduled', 'Confirmed', 'Booked'] },
-          },
-        });
-        if (!existingCall) {
-          await prisma.bookedCall.create({
-            data: {
-              userId: matchedUser.id,
-              leadId: matchedLead.id,
-              campaignId: matchedCampaign?.id || null,
-              callDate: existingSuggestedSlots[detectedSlotIndex - 1]?.start || new Date(),
-              status: 'Booked',
-              notes: 'Auto-booked from reply slot selection',
-            },
-          });
-        }
       }
     }
   }
@@ -533,21 +429,6 @@ Output ONLY valid JSON matching this schema:
       bookedCall
     }
   });
-
-  // Save new suggested slots to DB attached to this reply
-  if (newSuggestedSlots.length > 0 && matchedLead) {
-    await prisma.suggestedCalendarSlot.createMany({
-      data: newSuggestedSlots.map(s => ({
-        replyId: newReply.id,
-        userId: matchedUser!.id,
-        campaignId: matchedCampaign?.id || null,
-        leadId: matchedLead!.id,
-        start: s.start,
-        end: s.end,
-        label: s.label
-      }))
-    });
-  }
 
   // Inject auto-reply into EmailSequence to be picked up by the sender cron
   if (aiReplyStatus === 'Queued' && aiReplyScheduledAt && matchedUser && matchedCampaign && matchedLead) {

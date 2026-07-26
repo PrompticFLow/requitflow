@@ -46,7 +46,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { name: "Find Client Leads", href: "/dashboard/generate-leads", icon: UserPlus },
     // { name: "Job & Hiring Search", href: "/dashboard/job-search", icon: Search },
-    { name: "Person Leads", href: "/dashboard/person-leads", icon: Search },
     { name: "Client Lead Database", href: "/dashboard/leads", icon: Users },
     // { name: "Saved Jobs", href: "/dashboard/saved-jobs", icon: BookOpen },
     // { name: "Applied Jobs", href: "/dashboard/applied-jobs", icon: KanbanSquare },

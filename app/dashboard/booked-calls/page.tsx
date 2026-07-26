@@ -1,11 +1,12 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Search, Calendar, ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import { Search, Calendar, ExternalLink, Loader2, RefreshCw, CheckCircle2 } from "lucide-react";
 
 export default function BookedCallsPage() {
   const [calls, setCalls] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [closingId, setClosingId] = useState<string | null>(null);
 
   const fetchCalls = async () => {
     try {
@@ -48,6 +49,26 @@ export default function BookedCallsPage() {
     setSyncing(false);
   };
 
+  const handleMarkClosed = async (callId: string) => {
+    setClosingId(callId);
+    try {
+      const res = await fetch(`/api/booked-calls/${callId}/close`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'Failed to mark as closed.');
+        return;
+      }
+      setCalls((prev) =>
+        prev.map((call) => (call.id === callId ? { ...call, status: 'Closed' } : call))
+      );
+    } catch (e) {
+      console.error(e);
+      alert('Failed to mark as closed.');
+    } finally {
+      setClosingId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-end">
@@ -69,8 +90,8 @@ export default function BookedCallsPage() {
       <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex items-start space-x-3 text-blue-400">
         <Calendar size={20} className="shrink-0 mt-0.5" />
         <div className="text-sm">
-          <p className="font-semibold mb-1">Google Calendar is not connected yet. Booking Link Mode is active.</p>
-          <p>Leads are marked as booked based on your manual updates or simulated demo interactions.</p>
+          <p className="font-semibold mb-1">Booking Link Mode is active.</p>
+          <p>Connect Calendly in Settings to sync meetings automatically, or mark bookings manually from replies.</p>
         </div>
       </div>
 
@@ -144,13 +165,36 @@ export default function BookedCallsPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-green-400 text-xs font-medium uppercase">{call.status}</span>
+                      <span
+                        className={`text-xs font-medium uppercase ${
+                          call.status === 'Closed' ? 'text-slate-400' : 'text-green-400'
+                        }`}
+                      >
+                        {call.status}
+                      </span>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <a href={`/dashboard/leads/${call.leadId}`} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 transition-colors inline-flex items-center space-x-2 ml-auto">
-                        <ExternalLink size={14} />
-                        <span className="text-xs">View CRM</span>
-                      </a>
+                      <div className="inline-flex items-center gap-2 justify-end">
+                        {call.status !== 'Closed' && (
+                          <button
+                            type="button"
+                            onClick={() => handleMarkClosed(call.id)}
+                            disabled={closingId === call.id}
+                            className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-emerald-900/40 hover:text-emerald-300 transition-colors inline-flex items-center space-x-2 disabled:opacity-50"
+                          >
+                            {closingId === call.id ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <CheckCircle2 size={14} />
+                            )}
+                            <span className="text-xs">Mark as closed</span>
+                          </button>
+                        )}
+                        <a href={`/dashboard/leads/${call.leadId}`} className="p-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 transition-colors inline-flex items-center space-x-2">
+                          <ExternalLink size={14} />
+                          <span className="text-xs">View CRM</span>
+                        </a>
+                      </div>
                     </td>
                   </tr>
                 ))

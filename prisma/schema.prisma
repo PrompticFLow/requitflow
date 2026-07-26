@@ -30,7 +30,6 @@ model User {
   emailSequences            EmailSequence[]
   gmailAccounts             GmailAccount[]
   calendlyIntegration       CalendlyIntegration?
-  googleCalendarIntegration GoogleCalendarIntegration?
   jobApplications           JobApplication[]
   jobSearchHistory          JobSearchHistory[]
   knowledgeBaseFiles        KnowledgeBaseFile[]
@@ -833,27 +832,6 @@ model KnowledgeBaseFile {
   @@index([campaignId])
 }
 
-model GoogleCalendarIntegration {
-  id                     String    @id @default(cuid())
-  userId                 String    @unique
-  googleEmail            String?
-  accessTokenEncrypted   String?
-  refreshTokenEncrypted  String?
-  tokenExpiry            DateTime?
-  calendarId             String?
-  calendarName           String?
-  connected              Boolean   @default(false)
-  defaultDurationMinutes Int       @default(30)
-  timezone               String?   @default("America/New_York")
-  workingDays            String?   @default("MON,TUE,WED,THU,FRI")
-  workingHourStart       String?   @default("09:00")
-  workingHourEnd         String?   @default("17:00")
-  bufferMinutes          Int       @default(15)
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
-  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
 model CalendlyIntegration {
   id                          String    @id @default(cuid())
   userId                      String    @unique
@@ -868,17 +846,4 @@ model CalendlyIntegration {
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
   user                        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model SuggestedCalendarSlot {
-  id         String   @id @default(cuid())
-  replyId    String
-  userId     String
-  campaignId String?
-  leadId     String?
-  start      DateTime
-  end        DateTime
-  label      String
-  selected   Boolean  @default(false)
-  createdAt  DateTime @default(now())
 }

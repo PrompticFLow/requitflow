@@ -16,7 +16,7 @@ export default function PrivacyPolicy() {
           <section>
             <h2 className="text-xl font-semibold text-white mb-3">1. Information We Collect</h2>
             <p>
-              We collect information that you provide directly to us when using FunnelZen AI, including your name, email address, and OAuth authentication details when connecting services like Google Calendar or Gmail. We also collect data about your leads and campaigns necessary to provide the service.
+              We collect information that you provide directly to us when using FunnelZen AI, including your name, email address, and OAuth authentication details when connecting services like Gmail or Calendly. We also collect data about your leads and campaigns necessary to provide the service.
             </p>
           </section>
 
@@ -30,7 +30,7 @@ export default function PrivacyPolicy() {
           <section>
             <h2 className="text-xl font-semibold text-white mb-3">3. Third-Party Integrations</h2>
             <p>
-              Our app integrates with third-party services like Google Workspace. By connecting your Google account, you grant us access to perform actions on your behalf (such as reading emails and booking calendar events). We comply with the Google API Services User Data Policy, including the Limited Use requirements.
+              Our app integrates with third-party services like Google Workspace (Gmail) and Calendly. By connecting your accounts, you grant us access to perform actions on your behalf (such as sending and reading emails, and syncing scheduled meetings). For Google, we comply with the Google API Services User Data Policy, including the Limited Use requirements.
             </p>
           </section>
 

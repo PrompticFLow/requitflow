@@ -60,22 +60,6 @@ export default function SettingsPage() {
   const [imapTesting, setImapTesting] = useState(false);
   const [imapStatus, setImapStatus] = useState<any>({ isVerified: false, status: 'Unknown' });
 
-  // Google Calendar State
-  const [calendarData, setCalendarData] = useState<any>({
-    connected: false,
-    googleEmail: '',
-    calendarId: '',
-    defaultDurationMinutes: 30,
-    timezone: 'America/New_York',
-    workingDays: 'MON,TUE,WED,THU,FRI',
-    workingHourStart: '09:00',
-    workingHourEnd: '17:00',
-    bufferMinutes: 15
-  });
-  const [calendarLoading, setCalendarLoading] = useState(true);
-  const [calendarSaving, setCalendarSaving] = useState(false);
-  const [calendarsList, setCalendarsList] = useState<any[]>([]);
-
   // Calendly State
   const [calendlyData, setCalendlyData] = useState<{
     connected: boolean;
@@ -198,22 +182,6 @@ export default function SettingsPage() {
       })
       .catch(console.error)
       .finally(() => setImapLoading(false));
-
-    fetch("/api/integrations/google-calendar/status")
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.connected) {
-          setCalendarData(data);
-          // Fetch available calendars if connected
-          fetch("/api/integrations/google-calendar/calendars")
-            .then(cres => cres.json())
-            .then(cdata => {
-              if (cdata.calendars) setCalendarsList(cdata.calendars);
-            });
-        }
-      })
-      .catch(console.error)
-      .finally(() => setCalendarLoading(false));
 
     fetch("/api/integrations/calendly/status")
       .then((res) => res.json())
@@ -430,37 +398,6 @@ export default function SettingsPage() {
       alert("An error occurred while testing IMAP connection.");
     }
     setImapTesting(false);
-  };
-
-  const handleSaveCalendar = async () => {
-    setCalendarSaving(true);
-    try {
-      const res = await fetch("/api/integrations/google-calendar/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(calendarData)
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        alert("Calendar settings saved successfully.");
-      } else {
-        alert(data.error || "Failed to save calendar settings.");
-      }
-    } catch (e) {
-      alert("An error occurred while saving calendar settings.");
-    }
-    setCalendarSaving(false);
-  };
-
-  const handleDisconnectCalendar = async () => {
-    if (!confirm("Are you sure you want to disconnect Google Calendar?")) return;
-    try {
-      await fetch("/api/integrations/google-calendar/disconnect", { method: "POST" });
-      setCalendarData({ ...calendarData, connected: false, googleEmail: '' });
-      alert("Google Calendar disconnected.");
-    } catch (e) {
-      alert("Failed to disconnect calendar.");
-    }
   };
 
   const handleDisconnectCalendly = async () => {
@@ -980,119 +917,6 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
-          {/* Google Calendar Integration Card */}
-          <div className="glass p-8 rounded-2xl border border-slate-700/50 space-y-6 break-inside-avoid mb-6">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <div className="flex items-center space-x-3">
-                <svg className="w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10z"/>
-                </svg>
-                <h3 className="text-xl font-bold text-white">Google Calendar Integration</h3>
-              </div>
-              {calendarData.connected ? (
-                <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs rounded border border-green-500/30 flex items-center space-x-1">
-                  <Check size={14} /> <span>Connected</span>
-                </span>
-              ) : (
-                <span className="px-2 py-1 bg-slate-500/20 text-slate-400 text-xs rounded border border-slate-500/30">
-                  Not Connected
-                </span>
-              )}
-            </div>
-
-            <p className="text-sm text-slate-400 leading-relaxed mb-4">
-              AI can use your calendar availability to suggest real meeting times and book calls automatically when leads express interest.
-            </p>
-
-            {calendarLoading ? (
-              <div className="flex justify-center py-6"><Loader2 className="animate-spin text-blue-500" /></div>
-            ) : !calendarData.connected ? (
-              <div className="flex justify-center py-4">
-                <button onClick={async () => {
-                  try {
-                    const res = await fetch('/api/integrations/google-calendar/connect', { headers: { 'Accept': 'application/json' } });
-                    if (res.ok || res.status === 400) {
-                      const contentType = res.headers.get('content-type');
-                      if (contentType && contentType.includes('application/json')) {
-                        const data = await res.json();
-                        if (data.error) {
-                          alert("Google Calendar is not configured. Please add Google OAuth environment variables.");
-                          return;
-                        }
-                      }
-                    }
-                    window.location.href = '/api/integrations/google-calendar/connect';
-                  } catch (e) {
-                    window.location.href = '/api/integrations/google-calendar/connect';
-                  }
-                }} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors shadow-lg flex items-center gap-2">
-                  Connect Google Calendar
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="bg-slate-800/50 p-4 rounded-lg text-sm text-slate-300 border border-slate-700 flex justify-between items-center">
-                  <div>
-                    <span className="block text-xs text-slate-500">Connected Account</span>
-                    <strong className="text-white">{calendarData.googleEmail}</strong>
-                  </div>
-                  <button onClick={handleDisconnectCalendar} className="text-red-400 hover:text-red-300 text-xs">Disconnect</button>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-400">Select Calendar</label>
-                  <select value={calendarData.calendarId || ''} onChange={e => setCalendarData({...calendarData, calendarId: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-blue-500">
-                    <option value="">Primary Calendar</option>
-                    {calendarsList.map(c => (
-                      <option key={c.id} value={c.id}>{c.summary}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-400">Default Duration</label>
-                    <select value={calendarData.defaultDurationMinutes} onChange={e => setCalendarData({...calendarData, defaultDurationMinutes: parseInt(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-blue-500">
-                      <option value="15">15 minutes</option>
-                      <option value="30">30 minutes</option>
-                      <option value="45">45 minutes</option>
-                      <option value="60">60 minutes</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-400">Buffer Time</label>
-                    <select value={calendarData.bufferMinutes} onChange={e => setCalendarData({...calendarData, bufferMinutes: parseInt(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-blue-500">
-                      <option value="0">No buffer</option>
-                      <option value="10">10 minutes</option>
-                      <option value="15">15 minutes</option>
-                      <option value="30">30 minutes</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-400">Working Hours Start</label>
-                    <input type="time" value={calendarData.workingHourStart} onChange={e => setCalendarData({...calendarData, workingHourStart: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-blue-500" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-400">Working Hours End</label>
-                    <input type="time" value={calendarData.workingHourEnd} onChange={e => setCalendarData({...calendarData, workingHourEnd: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-blue-500" />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-400">Timezone</label>
-                  <input type="text" value={calendarData.timezone} onChange={e => setCalendarData({...calendarData, timezone: e.target.value})} placeholder="e.g. America/New_York" className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-blue-500" />
-                </div>
-
-                <button onClick={handleSaveCalendar} disabled={calendarSaving} className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors shadow-lg flex items-center justify-center gap-2 mt-2">
-                  {calendarSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />} Save Calendar Settings
-                </button>
-              </div>
-            )}
-          </div>
-
           {/* Calendly Integration Card */}
           <div className="glass p-8 rounded-2xl border border-slate-700/50 space-y-6 break-inside-avoid mb-6">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">

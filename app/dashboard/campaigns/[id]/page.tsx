@@ -676,7 +676,7 @@ export default function CampaignDetailPage() {
                  <AlertTriangle size={20} className="mt-0.5 shrink-0" />
                  <div>
                    <p className="font-semibold">{campaignLeads.filter(cl => !cl.lead.email || cl.lead.emailStatus === 'Missing').length} leads are missing email addresses.</p>
-                   <p className="text-sm opacity-90">Enrich contacts on the Person Leads Database page before starting an email campaign. Leads without emails will be skipped.</p>
+                   <p className="text-sm opacity-90">Enrich contacts in the Client Lead Database before starting an email campaign. Leads without emails will be skipped.</p>
                  </div>
                </div>
              )}
@@ -757,10 +757,10 @@ export default function CampaignDetailPage() {
                  <span>{seqGenerating ? "Generating..." : "Generate Email Sequences"}</span>
                </button>
                <button
-                 onClick={() => window.location.href = '/dashboard/person-leads'}
+                 onClick={() => window.location.href = '/dashboard/leads'}
                  className="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors shadow-lg shadow-purple-500/25 text-sm font-bold"
                >
-                 Go to Person Leads Database
+                 Go to Client Lead Database
                </button>
              </div>
            </div>
@@ -805,9 +805,9 @@ export default function CampaignDetailPage() {
            {campaignLeads.length === 0 ? (
              <div className="glass p-12 rounded-2xl border border-slate-700/50 text-center">
                <h3 className="text-lg text-white mb-2">No leads added yet.</h3>
-               <p className="text-slate-400 text-sm mb-4">Add person leads from the Person Leads Database.</p>
-               <Link href="/dashboard/person-leads" className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-2 mt-auto">
-                    <Search size={16} /> Go to Person Leads Database
+               <p className="text-slate-400 text-sm mb-4">Add leads from the Client Lead Database.</p>
+               <Link href="/dashboard/leads" className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-2 mt-auto">
+                    <Search size={16} /> Go to Client Lead Database
                </Link>
              </div>
            ) : (

@@ -283,10 +283,10 @@ export default function JobDetailsPage() {
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-800">
-              <Link href={`/dashboard/person-leads?companyId=${job.companyId}`}>
+              <Link href={`/dashboard/leads`}>
                 <button className="w-full bg-slate-800 hover:bg-slate-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center space-x-2">
                   <BarChart size={16} />
-                  <span>View Hiring Profile</span>
+                  <span>View Client Leads</span>
                 </button>
               </Link>
             </div>
