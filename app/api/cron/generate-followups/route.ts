@@ -26,7 +26,9 @@ export async function GET(req: Request) {
         status: 'Active',
         campaign: { status: 'Active' },
         lead: {
-          status: { notIn: ['Replied', 'Booked', 'Not Interested', 'Bounced', 'Unsubscribed'] }
+          // 'Replied' is intentionally not filtered here: a reply only stops
+          // follow-ups in the campaign it happened in (checked per-campaign below).
+          status: { notIn: ['Booked', 'Not Interested', 'Bounced', 'Unsubscribed'] }
         }
       },
       include: {
@@ -48,6 +50,18 @@ export async function GET(req: Request) {
           where: { id: cl.id },
           data: { status: 'Unsubscribed' }
         });
+        continue;
+      }
+
+      // A reply stops follow-up generation only in the campaign it was received in
+      const repliedInCampaign = await prisma.emailReply.findFirst({
+        where: {
+          leadId: cl.leadId,
+          OR: [{ campaignId: cl.campaignId }, { campaignId: null }]
+        },
+        select: { id: true }
+      });
+      if (repliedInCampaign) {
         continue;
       }
 

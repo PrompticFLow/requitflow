@@ -1,11 +1,12 @@
-// Runs once when the Next.js server boots (Railway / VPS / Docker / `next start`).
-// Starts a background scheduler that sends due campaign emails and polls Gmail
-// inboxes for replies + bounces — no cron service or user visit required.
+// Runs once when the Next.js server boots on the Railway dedicated server
+// (or any VPS / Docker / `next start`). This IS the app's scheduler — it sends
+// due campaign emails on an interval; no external cron service is needed.
+// Replies arrive push-based via /api/webhooks/resend.
 //
 // Env knobs:
 //   SCHEDULER_INTERVAL_MINUTES   how often to tick (default 10)
-//   DISABLE_BACKGROUND_SCHEDULER set to "true" to turn off (e.g. on Vercel,
-//                                where /api/cron/gmail-sync does the same job)
+//   DISABLE_BACKGROUND_SCHEDULER set to "true" to turn off (only if you drive
+//                                /api/cron/send-due-emails from an external cron)
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
@@ -24,27 +25,10 @@ export async function register() {
     if (running) return; // never overlap ticks
     running = true;
     try {
-      const { prisma } = await import('@/lib/prisma');
       const { processDueEmails } = await import('@/lib/email-dispatch');
-      const { pollGmailAccount } = await import('@/lib/gmail');
 
-      // 1. Poll every connected Gmail inbox for replies and bounces
-      const accounts = await prisma.gmailAccount.findMany({
-        where: { status: 'Active' },
-        select: { id: true, email: true },
-      });
-      for (const account of accounts) {
-        try {
-          const result = await pollGmailAccount(account.id);
-          if (result.repliesFound > 0 || result.bouncesFound > 0) {
-            console.log(`[scheduler] ${account.email}: ${result.repliesFound} replies, ${result.bouncesFound} bounces`);
-          }
-        } catch (err: any) {
-          console.error(`[scheduler] Gmail poll failed for ${account.email}:`, err?.message);
-        }
-      }
-
-      // 2. Send any due scheduled emails (Email 1 + follow-ups)
+      // Send any due scheduled emails (Email 1 + follow-ups + AI replies).
+      // Reply capture is push-based via the Resend webhook (/api/webhooks/resend).
       const dispatch = await processDueEmails({});
       if (dispatch.sent > 0 || dispatch.failed > 0) {
         console.log(`[scheduler] Dispatch: ${dispatch.sent} sent, ${dispatch.failed} failed`);

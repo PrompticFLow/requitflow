@@ -126,6 +126,8 @@ Return ONLY valid JSON. Use lowercase keys only.
 }
 ]
 }
+
+PLACEHOLDER RULE: The ONLY allowed placeholders are {{firstName}} and {{companyName}}. NEVER invent other placeholders like {{targetIndustry}}, {{painPoints}}, {{yourCompany}} or {{yourName}} — write the actual words. If a detail is unknown, write around it naturally.
 `;
 
   let maxAttempts = 3;

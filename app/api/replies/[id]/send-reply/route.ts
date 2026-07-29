@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 import nodemailer from 'nodemailer';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
 import sgMail from '@sendgrid/mail';
-import { sendViaGmail, resolveGmailReplyThreading } from '@/lib/gmail';
+import { sendViaResend, getCampaignResendSender } from '@/lib/resend';
 import { buildReplySubject } from '@/lib/email/reply-subject';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -33,14 +33,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: 'Reply, Lead, or Campaign not found.' }, { status: 404 });
     }
 
-    // Check sending methods: campaign Gmail first, then SMTP, then SendGrid
-    let gmailAccount = null;
-    if ((reply.campaign as any).gmailAccountId) {
-      gmailAccount = await prisma.gmailAccount.findUnique({
-        where: { id: (reply.campaign as any).gmailAccountId }
-      });
-      if (gmailAccount && gmailAccount.status !== 'Active') gmailAccount = null;
-    }
+    // Check sending methods: campaign Resend key first, then SMTP, then SendGrid
+    const resendSender = getCampaignResendSender(reply.campaign as any);
 
     const smtpAccount = await prisma.smtpAccount.findUnique({
       where: { userId: user.id }
@@ -51,8 +45,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const sendgridFromEmail = process.env.SENDGRID_FROM_EMAIL;
     const hasSendGrid = !!(sendgridApiKey && sendgridFromEmail);
 
-    if (!gmailAccount && !hasVerifiedSmtp && !hasSendGrid) {
-      return NextResponse.json({ error: 'Connect a Gmail account to this campaign (or configure SMTP/SendGrid) to send replies.' }, { status: 400 });
+    if (!resendSender && !hasVerifiedSmtp && !hasSendGrid) {
+      return NextResponse.json({ error: 'Add a Resend API key and sender email to this campaign (or configure SMTP/SendGrid) to send replies.' }, { status: 400 });
     }
 
     const to = reply.lead.email;
@@ -64,25 +58,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     let sentMessageId = '';
     const storedMessageId = (reply as any).messageId as string | null | undefined;
 
-    // Send email — Priority 1: campaign's connected Gmail account
-    if (gmailAccount) {
-      let threadId: string | undefined;
+    // Send email — Priority 1: campaign's Resend API key
+    if (resendSender) {
       const headers: Record<string, string> = {};
-
       if (storedMessageId) {
-        const threading = await resolveGmailReplyThreading(gmailAccount.id, storedMessageId);
-        threadId = threading.threadId;
-        if (threading.inReplyTo) headers['In-Reply-To'] = threading.inReplyTo;
-        if (threading.references) headers['References'] = threading.references;
+        headers['In-Reply-To'] = storedMessageId;
+        headers['References'] = storedMessageId;
       }
 
-      const info = await sendViaGmail(gmailAccount.id, {
+      const info = await sendViaResend(resendSender.apiKey, {
         to: to as string,
         subject: emailSubject,
         html: emailBody,
+        fromEmail: resendSender.fromEmail,
         fromName: reply.campaign.senderName || user.name || undefined,
-        replyTo: gmailAccount.email,
-        threadId,
+        replyTo: resendSender.fromEmail,
         headers,
       });
       sentMessageId = info.messageId || '';

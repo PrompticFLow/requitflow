@@ -2,7 +2,13 @@ import { prisma } from '@/lib/prisma';
 import sgMail from '@sendgrid/mail';
 import nodemailer from 'nodemailer';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
-import { sendViaGmail, gmailSentTodayCount, resolveGmailReplyThreading } from '@/lib/gmail';
+import {
+  sendViaResend,
+  getCampaignResendSender,
+  campaignSentTodayCount,
+  resolveReplyThreadingHeaders,
+} from '@/lib/resend';
+import { fillMergeTags } from '@/lib/email/fill-merge-tags';
 
 export interface SendCampaignEmailOptions {
   to: string;
@@ -59,6 +65,13 @@ export async function sendCampaignEmail({
   if (emailSequence.userId !== user.id || emailSequence.campaignId !== campaign.id) {
     return { success: false, error: "Email sequence does not belong to the correct user or campaign." };
   }
+
+  // Fill any merge tags the AI left in ({{firstName}}, {{painPoints}}, …) so
+  // raw placeholders never reach a prospect's inbox.
+  const mergeCtx = { lead, campaign, user };
+  subject = fillMergeTags(subject, mergeCtx);
+  html = fillMergeTags(html, mergeCtx);
+  if (text) text = fillMergeTags(text, mergeCtx);
 
   // An unsubscribe link is auto-appended to every tracked send (see below),
   // so a manual unsubscribe line is only required for untracked sends.
@@ -117,72 +130,54 @@ export async function sendCampaignEmail({
     return { success: false, error: "Lead email address is invalid." };
   }
   
-  // Use centralized anti-ban and safety checks
+  // Use centralized anti-ban and safety checks. Manually started sequences
+  // bypass the soft stops (replied / booked / lead status) — the user chose
+  // to send; unsubscribe/suppression and send limits still apply.
   const { canSendEmail } = require('./email/can-send-email');
   const safetyCheck = await canSendEmail(user.id, lead.id, campaign.id, {
-    isReplyEmail: emailSequence.sequenceStep >= 99
+    isReplyEmail: emailSequence.sequenceStep >= 99,
+    manualOverride: (emailSequence as any).manualStart === true
   });
   if (!safetyCheck.canSend) {
     return { success: false, error: safetyCheck.reason };
   }
 
-  // Priority 0: Campaign's connected Gmail account (client's own inbox)
-  const gmailAccountId = (campaign as any).gmailAccountId as string | null;
-  if (gmailAccountId) {
-    const gmailAccount = await prisma.gmailAccount.findUnique({ where: { id: gmailAccountId } });
-    if (gmailAccount && gmailAccount.status === 'Active') {
-      try {
-        const sentToday = await gmailSentTodayCount(gmailAccount.id);
-        if (sentToday >= gmailAccount.dailyLimit) {
-          return { success: false, error: `Daily sending limit reached for ${gmailAccount.email} (${gmailAccount.dailyLimit}/day). Emails will resume tomorrow.` };
-        }
-
-        const headers: Record<string, string> = {};
-        if (unsubscribeUrl) {
-          headers['List-Unsubscribe'] = `<${unsubscribeUrl}>`;
-          headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
-        }
-
-        // Reply emails (step >= 99) must stay in the original Gmail thread
-        let threadId: string | undefined;
-        if (emailSequence.sequenceStep >= 99) {
-          const inbound = await prisma.emailReply.findFirst({
-            where: {
-              campaignId: campaign.id,
-              leadId: lead.id,
-              messageId: { not: null },
-            },
-            orderBy: { createdAt: 'desc' },
-            select: { messageId: true },
-          });
-          if (inbound?.messageId) {
-            const threading = await resolveGmailReplyThreading(gmailAccount.id, inbound.messageId);
-            threadId = threading.threadId;
-            if (threading.inReplyTo) headers['In-Reply-To'] = threading.inReplyTo;
-            if (threading.references) headers['References'] = threading.references;
-          }
-        }
-
-        const info = await sendViaGmail(gmailAccount.id, {
-          to,
-          subject,
-          html: finalHtml,
-          text: text || html.replace(/<[^>]+>/g, ''),
-          fromName: campaign.senderName || gmailAccount.displayName || user.name || undefined,
-          replyTo: gmailAccount.email,
-          threadId,
-          headers,
-        });
-
-        return { success: true, messageId: info.messageId };
-      } catch (error: any) {
-        console.error('Gmail send error:', error?.message);
-        await prisma.gmailAccount.update({
-          where: { id: gmailAccount.id },
-          data: { lastError: error?.message?.slice(0, 500) || 'Send failed' },
-        }).catch(() => {});
-        return { success: false, error: 'Gmail sending failed. Try reconnecting the Gmail account for this campaign.' };
+  // Priority 0: Campaign's own Resend API key + sender email
+  const resendSender = getCampaignResendSender(campaign as any);
+  if (resendSender) {
+    try {
+      const dailyCap = campaign.dailyLimit || 50;
+      const sentToday = await campaignSentTodayCount(campaign.id);
+      if (sentToday >= dailyCap) {
+        return { success: false, error: `Daily sending limit reached for this campaign (${dailyCap}/day). Emails will resume tomorrow.` };
       }
+
+      const headers: Record<string, string> = {};
+      if (unsubscribeUrl) {
+        headers['List-Unsubscribe'] = `<${unsubscribeUrl}>`;
+        headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
+      }
+
+      // Reply emails (step >= 99) must stay in the original thread
+      if (emailSequence.sequenceStep >= 99) {
+        Object.assign(headers, await resolveReplyThreadingHeaders(campaign.id, lead.id));
+      }
+
+      const info = await sendViaResend(resendSender.apiKey, {
+        to,
+        subject,
+        html: finalHtml,
+        text: text || html.replace(/<[^>]+>/g, ''),
+        fromEmail: resendSender.fromEmail,
+        fromName: campaign.senderName || user.name || undefined,
+        replyTo: resendSender.fromEmail,
+        headers,
+      });
+
+      return { success: true, messageId: info.messageId };
+    } catch (error: any) {
+      console.error('Resend send error:', error?.message);
+      return { success: false, error: error?.message || 'Resend sending failed. Check this campaign\'s Resend API key and sender email.' };
     }
   }
 
@@ -202,7 +197,7 @@ export async function sendCampaignEmail({
   if (!hasVerifiedSmtp && !hasSendGrid) {
     return {
       success: false,
-      error: "Connect a Gmail account to this campaign (or configure SMTP/SendGrid) before sending."
+      error: "Add a Resend API key and sender email to this campaign (or configure SMTP/SendGrid) before sending."
     };
   }
 
@@ -356,17 +351,11 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
     ]
   });
 
-  // Per-user daily send caps: the campaign's Gmail account limit when connected,
-  // otherwise the legacy conservative default.
-  const gmailLimitCache: Record<string, number> = {};
+  // Per-user daily send caps: the campaign's configured limit when its own
+  // Resend sender is set up, otherwise the legacy conservative default.
   const resolveDailyCap = async (campaign: any): Promise<number> => {
-    const gmailAccountId = campaign.gmailAccountId as string | null;
-    if (gmailAccountId) {
-      if (gmailLimitCache[gmailAccountId] === undefined) {
-        const account = await prisma.gmailAccount.findUnique({ where: { id: gmailAccountId } });
-        gmailLimitCache[gmailAccountId] = account?.dailyLimit || 50;
-      }
-      return gmailLimitCache[gmailAccountId];
+    if (campaign.resendApiKeyEncrypted && campaign.resendFromEmail) {
+      return campaign.dailyLimit || 50;
     }
     return campaign.dailyLimit || 10;
   };
@@ -418,11 +407,18 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
         continue;
       }
 
-      // 2. Check if Lead Replied, Booked, or met any other stop condition.
-      // Reply-continuation emails only stop for hard-negative statuses.
-      const stopStatuses = isReplyEmail
-        ? ['Not Interested', 'Bounced', 'Unsubscribed', 'Spam complaint']
-        : ['Booked', 'Not Interested', 'Replied', 'Bounced', 'Opportunity Won', 'Opportunity Lost', 'Spam complaint'];
+      // Manually started sequences (Start Sequence button) bypass the soft
+      // safeguards below — only hard compliance stops apply to them.
+      const isManual = (email as any).manualStart === true;
+
+      // 2. Check hard stop conditions on the lead. Note: 'Replied' is NOT a
+      // global stop — a reply only pauses the campaign it happened in (see the
+      // campaign-scoped EmailReply check below), never other campaigns.
+      const stopStatuses = isManual
+        ? ['Bounced', 'Unsubscribed', 'Spam complaint']
+        : isReplyEmail
+          ? ['Not Interested', 'Bounced', 'Unsubscribed', 'Spam complaint']
+          : ['Booked', 'Not Interested', 'Bounced', 'Opportunity Won', 'Opportunity Lost', 'Spam complaint'];
       if (stopStatuses.includes(lead.status)) {
         await prisma.emailSequence.update({
           where: { id: email.id },
@@ -432,15 +428,20 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
         continue;
       }
 
-      // Check EmailReply table for safety (sequence emails only)
-      if (!isReplyEmail) {
+      // Campaign-scoped reply stop (sequence emails only): a reply in THIS
+      // campaign cancels its remaining steps. Replies that couldn't be matched
+      // to a campaign (campaignId null) stop everywhere, to stay safe.
+      if (!isReplyEmail && !isManual) {
         const hasReply = await prisma.emailReply.findFirst({
-          where: { leadId: lead.id, campaignId: campaign.id }
+          where: {
+            leadId: lead.id,
+            OR: [{ campaignId: campaign.id }, { campaignId: null }]
+          }
         });
         if (hasReply) {
           await prisma.emailSequence.update({
             where: { id: email.id },
-            data: { status: 'Cancelled', errorMessage: 'Stopped because lead replied.' }
+            data: { status: 'Cancelled', errorMessage: 'Stopped because lead replied in this campaign.' }
           });
           processedCount++;
           continue;

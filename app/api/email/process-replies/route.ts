@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import nodemailer from 'nodemailer';
 import sgMail from '@sendgrid/mail';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
+import { sendViaResend, getCampaignResendSender } from '@/lib/resend';
 import { buildReplySubject } from '@/lib/email/reply-subject';
 
 export const maxDuration = 300;
@@ -62,6 +63,8 @@ export async function GET(req: Request) {
           throw new Error('Lead is unsubscribed');
         }
 
+        const resendSender = getCampaignResendSender(campaign as any);
+
         const smtp = await prisma.smtpAccount.findUnique({ where: { userId: user.id } });
         const fromEmail = smtp?.fromEmail || campaign.senderEmail || user.email;
         const fromName = smtp?.fromName || campaign.senderName || user.name;
@@ -69,11 +72,31 @@ export async function GET(req: Request) {
         const hasVerifiedSmtp = smtp && smtp.isVerified && smtp.status === 'Active';
         const hasSendGrid = !!(process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM_EMAIL);
 
-        if (!hasVerifiedSmtp && !hasSendGrid) {
+        if (!resendSender && !hasVerifiedSmtp && !hasSendGrid) {
           throw new Error('No verified sender available');
         }
 
-        if (hasVerifiedSmtp && smtp) {
+        if (resendSender) {
+          const replySubject = buildReplySubject(
+            reply.aiReplySubject || reply.subject,
+            campaign.name
+          );
+          const headers: Record<string, string> = {};
+          if ((reply as any).messageId) {
+            headers['In-Reply-To'] = (reply as any).messageId;
+            headers['References'] = (reply as any).messageId;
+          }
+          await sendViaResend(resendSender.apiKey, {
+            to: reply.fromEmail,
+            subject: replySubject,
+            html: (reply.aiSuggestedReply || '').replace(/\n/g, '<br/>'),
+            text: reply.aiSuggestedReply || '',
+            fromEmail: resendSender.fromEmail,
+            fromName: campaign.senderName || user.name || undefined,
+            replyTo: resendSender.fromEmail,
+            headers,
+          });
+        } else if (hasVerifiedSmtp && smtp) {
           const pass = decryptSmtpPass(smtp.smtpPassEncrypted);
           const username = decryptSmtpPass(smtp.smtpUserEncrypted);
           const transporter = nodemailer.createTransport({

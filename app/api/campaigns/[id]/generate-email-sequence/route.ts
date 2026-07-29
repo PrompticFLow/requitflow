@@ -300,6 +300,8 @@ Return ONLY valid JSON. Do not include markdown. Do not include explanations. Us
 ]
 }
 
+PLACEHOLDER RULE: The ONLY allowed placeholders are {{firstName}} and {{companyName}}. NEVER invent other placeholders like {{targetIndustry}}, {{painPoints}}, {{yourCompany}}, {{desiredOutcome}} or {{yourName}} — write the actual words using the campaign details above. If a detail is unknown, write around it naturally.
+
 If the model cannot generate, return: {"emails": []}`;
 
         let sequenceData: any[] = [];

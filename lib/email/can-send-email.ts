@@ -9,13 +9,17 @@ export async function canSendEmail(
   userId: string,
   leadId: string,
   campaignId: string,
-  options: { isReplyEmail?: boolean } = {}
+  options: { isReplyEmail?: boolean; manualOverride?: boolean } = {}
 ): Promise<CanSendResult> {
   // 1. Check if Lead Unsubscribed
+  // Reply checks are scoped to this campaign (a reply with no campaign match
+  // is treated as belonging to every campaign, to stay on the safe side).
   const lead = await prisma.lead.findUnique({
     where: { id: leadId },
     include: {
-      replies: true,
+      replies: {
+        where: { OR: [{ campaignId }, { campaignId: null }] }
+      },
       bookedCalls: true
     }
   });
@@ -31,13 +35,27 @@ export async function canSendEmail(
   }
 
   // 2/3. Replied & booked leads block sequence emails — but NOT AI reply
-  // continuations, which exist precisely to answer a lead who replied.
-  if (!options.isReplyEmail) {
+  // continuations, which exist precisely to answer a lead who replied, and
+  // NOT manually started sequences, where the user explicitly chose to send.
+  // A reply only stops sequences in the campaign it was received in, so the
+  // lead keeps getting emails from other campaigns.
+  if (!options.isReplyEmail && !options.manualOverride) {
     if (lead.replies && lead.replies.length > 0) {
-      return { canSend: false, reason: "Lead has already replied." };
+      return { canSend: false, reason: "Lead has already replied in this campaign." };
     }
 
-    if (lead.status === "Replied" || lead.status === "Interested" || lead.status === "Not Interested") {
+    const repliedInCampaign = await prisma.emailReply.findFirst({
+      where: {
+        leadId,
+        OR: [{ campaignId }, { campaignId: null }]
+      },
+      select: { id: true }
+    });
+    if (repliedInCampaign) {
+      return { canSend: false, reason: "Lead has already replied in this campaign." };
+    }
+
+    if (lead.status === "Not Interested") {
       return { canSend: false, reason: `Lead status is ${lead.status}.` };
     }
 
@@ -48,7 +66,7 @@ export async function canSendEmail(
     if (lead.status === "Call Booked" || lead.status === "Closed") {
       return { canSend: false, reason: `Lead status is ${lead.status}.` };
     }
-  } else if (lead.status === "Not Interested") {
+  } else if (!options.manualOverride && lead.status === "Not Interested") {
     return { canSend: false, reason: "Lead is not interested." };
   }
 

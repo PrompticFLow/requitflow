@@ -43,30 +43,28 @@ export async function checkCampaignReadyToStart(
   const calendlyLink =
     calendly?.connected && calendly.schedulingUrl ? calendly.schedulingUrl : null;
 
-  // 1. Sender email check: campaign Gmail account, verified SMTP, or SendGrid
+  // 1. Sender email check: campaign Resend key + sender email, verified SMTP, or SendGrid
   const hasSendGridKey = !!process.env.SENDGRID_API_KEY;
   const hasSendGridEmail = !!process.env.SENDGRID_FROM_EMAIL;
 
   const smtpAccount = await prisma.smtpAccount.findUnique({ where: { userId } });
   const hasVerifiedSmtp = smtpAccount && smtpAccount.isVerified && smtpAccount.status === 'Active';
 
-  let gmailAccount: any = null;
-  if ((campaign as any).gmailAccountId) {
-    gmailAccount = await prisma.gmailAccount.findUnique({ where: { id: (campaign as any).gmailAccountId } });
-  }
-  const hasCampaignGmail = !!(gmailAccount && gmailAccount.status === 'Active');
+  const hasCampaignResend = !!(
+    (campaign as any).resendApiKeyEncrypted && (campaign as any).resendFromEmail
+  );
 
-  const senderOk = hasCampaignGmail || hasVerifiedSmtp || (hasSendGridKey && hasSendGridEmail);
+  const senderOk = hasCampaignResend || hasVerifiedSmtp || (hasSendGridKey && hasSendGridEmail);
 
   items.push({
     key: 'senderEmail',
-    label: 'Sender email connected',
+    label: 'Sender email configured',
     passed: senderOk,
-    actionHint: 'Connect a Gmail account to this campaign (or configure SMTP/SendGrid) before starting.'
+    actionHint: 'Add your Resend API key and sender email to this campaign (or configure SMTP/SendGrid) before starting.'
   });
 
   if (!senderOk) {
-    missingRequirements.push('Connect a Gmail sending account before starting.');
+    missingRequirements.push('Add a Resend API key and sender email before starting.');
   }
 
   // 2. Booking link (optional — emails fall back to a reply-based CTA without one)
@@ -149,10 +147,10 @@ export async function checkCampaignReadyToStart(
     actionHint: 'Review and approve Email 1 for all leads before starting.'
   });
 
-  // 6. Daily sending limit (Gmail account limit, then SMTP, then campaign/settings)
-  const dailyLimitVal = gmailAccount?.dailyLimit
+  // 6. Daily sending limit (campaign limit, then SMTP, then settings; Resend campaigns default to 50/day)
+  const dailyLimitVal = campaign.dailyLimit
+    || (hasCampaignResend ? 50 : 0)
     || smtpAccount?.dailyLimit
-    || campaign.dailyLimit
     || userSettings?.dailyEmailLimit
     || 0;
   const delaySeconds = smtpAccount?.delayBetweenEmailsSeconds || campaign.sendDelaySeconds || 120;

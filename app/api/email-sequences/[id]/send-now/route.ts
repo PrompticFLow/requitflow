@@ -42,8 +42,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: 'Cannot send to unsubscribed lead' }, { status: 400 });
     }
 
-    if (sequence.lead.status === 'Replied' || sequence.lead.status === 'Booked') {
-      return NextResponse.json({ error: 'Cannot send to a lead that has already replied or booked' }, { status: 400 });
+    if (sequence.lead.status === 'Booked') {
+      return NextResponse.json({ error: 'Cannot send to a lead that has already booked' }, { status: 400 });
+    }
+
+    // A reply blocks sending only within the campaign it was received in
+    const repliedInCampaign = await prisma.emailReply.findFirst({
+      where: {
+        leadId: sequence.leadId,
+        OR: [{ campaignId: sequence.campaignId }, { campaignId: null }]
+      },
+      select: { id: true }
+    });
+    if (repliedInCampaign) {
+      return NextResponse.json({ error: 'Cannot send: this lead has already replied in this campaign' }, { status: 400 });
     }
 
     const smtpAccount = await prisma.smtpAccount.findUnique({ where: { userId: user.id } });

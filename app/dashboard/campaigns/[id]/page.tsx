@@ -25,10 +25,11 @@ export default function CampaignDetailPage() {
   const [calendlyLoading, setCalendlyLoading] = useState(true);
   const [applyingCalendlyLink, setApplyingCalendlyLink] = useState(false);
 
-  // Gmail Sending Account State
-  const [gmailAccounts, setGmailAccounts] = useState<any[]>([]);
-  const [selectedGmailId, setSelectedGmailId] = useState("");
-  const [gmailBusy, setGmailBusy] = useState(false);
+  // Resend Sending Account State (one API key + sender email per campaign)
+  const [resendKeyInput, setResendKeyInput] = useState("");
+  const [resendFromInput, setResendFromInput] = useState("");
+  const [resendEditing, setResendEditing] = useState(false);
+  const [resendBusy, setResendBusy] = useState(false);
 
   // Email Sequence State
   const [seqGenerating, setSeqGenerating] = useState(false);
@@ -37,6 +38,7 @@ export default function CampaignDetailPage() {
   const [emailModal, setEmailModal] = useState<{ lead: any; step: number; email: any } | null>(null);
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [bulkApproving, setBulkApproving] = useState(false);
+  const [startingLeads, setStartingLeads] = useState(false);
   const [editLeadModal, setEditLeadModal] = useState<any | null>(null);
 
   // Offer editing state
@@ -169,10 +171,9 @@ export default function CampaignDetailPage() {
   const fetchCampaignData = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [seqRes, campRes, gmailRes, repliesRes, bookedRes, calendlyRes] = await Promise.all([
+      const [seqRes, campRes, repliesRes, bookedRes, calendlyRes] = await Promise.all([
         fetch(`/api/campaigns/${campaignId}/email-sequences`),
         fetch(`/api/campaigns/${campaignId}`),
-        fetch(`/api/integrations/gmail/accounts`),
         fetch(`/api/replies?campaignId=${campaignId}`),
         fetch(`/api/booked-calls?campaignId=${campaignId}`),
         fetch(`/api/integrations/calendly/status`),
@@ -183,11 +184,6 @@ export default function CampaignDetailPage() {
       if (campRes.ok) {
         const campData = await campRes.json();
         setCampaignData(campData.campaign);
-      }
-
-      if (gmailRes.ok) {
-        const gmailData = await gmailRes.json();
-        setGmailAccounts(gmailData.accounts || []);
       }
 
       if (repliesRes.ok) {
@@ -335,21 +331,126 @@ export default function CampaignDetailPage() {
     setBulkApproving(false);
   };
 
-  const handleAttachGmail = async (accountId: string | null) => {
-    setGmailBusy(true);
+  const handleSaveResend = async () => {
+    const apiKey = resendKeyInput.trim();
+    const fromEmail = resendFromInput.trim();
+    if (!fromEmail) return alert("Enter the email address you want to send from.");
+    if (!campaignData?.resendConfigured && !apiKey) return alert("Enter your Resend API key (starts with re_).");
+
+    setResendBusy(true);
+    try {
+      const payload: any = { resendFromEmail: fromEmail };
+      if (apiKey) payload.resendApiKey = apiKey; // only replace the key when a new one was typed
+      const res = await fetch(`/api/campaigns/${campaignId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setResendKeyInput("");
+        setResendFromInput("");
+        setResendEditing(false);
+        await fetchCampaignData(true);
+        if (data.webhookAutoSetup === 'created') {
+          alert("Sending account saved. Reply & bounce tracking was set up automatically in your Resend account.");
+        } else if (data.webhookAutoSetup === 'skipped-localhost') {
+          alert("Sending account saved. Note: reply tracking needs a public app URL — set NEXT_PUBLIC_APP_URL to your ngrok/deployed URL, restart, and re-save the API key so the webhook can be created.");
+        } else if (data.webhookAutoSetup === 'failed') {
+          alert("Sending account saved, but reply tracking could not be set up in Resend automatically. Add a webhook manually in Resend (events: email.received, email.bounced) pointing to /api/webhooks/resend.");
+        }
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to save sending account.");
+      }
+    } catch (e) { console.error(e); }
+    setResendBusy(false);
+  };
+
+  const handleDisconnectResend = async () => {
+    if (!confirm("Remove the Resend API key and sender email from this campaign? Sending will stop until you add them again.")) return;
+    setResendBusy(true);
     try {
       const res = await fetch(`/api/campaigns/${campaignId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gmailAccountId: accountId })
+        body: JSON.stringify({ resendApiKey: null, resendFromEmail: null })
       });
       if (res.ok) await fetchCampaignData(true);
       else {
         const data = await res.json();
-        alert(data.error || "Failed to update sending account.");
+        alert(data.error || "Failed to remove sending account.");
       }
     } catch (e) { console.error(e); }
-    setGmailBusy(false);
+    setResendBusy(false);
+  };
+
+  const handleStartCampaign = async () => {
+    if (campaignLeads.length === 0) return alert("Add leads to this campaign before starting.");
+    const unapproved = campaignLeads.some(cl => {
+      const emails = cl.lead.emailSequences || [];
+      if (emails.length === 0) return true;
+      return emails.some((e: any) => e.sequenceStep === 1 && e.approvalStatus !== 'Approved');
+    });
+    if (unapproved) {
+      const noEmails = campaignLeads.some(cl => !cl.lead.emailSequences || cl.lead.emailSequences.length === 0);
+      if (noEmails) return alert("Generate emails for your campaign leads first.");
+      return alert("Approve Email 1 for every lead before starting this campaign. Open an email cell and click Approve.");
+    }
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/start-sending`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        alert(campaignData?.status === 'Paused' ? "Campaign restarted! Queued emails will resume sending." : "Campaign started! Email 1 is being sent.");
+        await fetchCampaignData(true);
+      } else {
+        const missing = data.missingRequirements || data.missing;
+        if (missing && missing.length > 0) {
+          alert(`Failed to start campaign. Missing Requirements:\n\n- ${missing.join('\n- ')}`);
+        } else {
+          alert(data.error || "Failed to start campaign.");
+        }
+      }
+    } catch(e) { console.error(e); }
+  };
+
+  const handlePauseCampaign = async () => {
+    if (!confirm("Pause this campaign? Scheduled emails will stop sending until you restart it.")) return;
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/pause`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        alert("Campaign paused.");
+        await fetchCampaignData(true);
+      } else {
+        alert(data.error || "Failed to pause campaign.");
+      }
+    } catch(e) { console.error(e); }
+  };
+
+  const handleStartSequenceForLeads = async () => {
+    if (selectedLeadIds.length === 0) return;
+    setStartingLeads(true);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/start-leads`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadIds: selectedLeadIds })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await fetchCampaignData(true);
+        setSelectedLeadIds([]);
+        alert(
+          data.requeued > 0
+            ? `Started sequences for ${data.leadsStarted} lead${data.leadsStarted === 1 ? '' : 's'} (${data.requeued} emails queued).${data.campaignActivated ? ' Campaign is now Active.' : ''}`
+            : "No approved, unsent emails found for the selected leads. Approve their emails first."
+        );
+      } else {
+        alert(data.error || "Failed to start sequences for the selected leads.");
+      }
+    } catch (e) { console.error(e); }
+    setStartingLeads(false);
   };
 
   const handleRemoveLead = async (leadId: string) => {
@@ -414,38 +515,29 @@ export default function CampaignDetailPage() {
                <h3 className="text-xl font-bold text-white flex items-center gap-2">
                  {campaignData?.name || 'Campaign Overview'}
                </h3>
-               <div className="flex space-x-3">
-                 <button
-                   onClick={async () => {
-                     if (campaignLeads.length === 0) return alert("Add leads to this campaign before starting.");
-                     const unapproved = campaignLeads.some(cl => {
-                       const emails = cl.lead.emailSequences || [];
-                       if (emails.length === 0) return true;
-                       return emails.some((e: any) => e.sequenceStep === 1 && e.approvalStatus !== 'Approved');
-                     });
-                     if (unapproved) {
-                       const noEmails = campaignLeads.some(cl => !cl.lead.emailSequences || cl.lead.emailSequences.length === 0);
-                       if (noEmails) return alert("Generate emails for your campaign leads first.");
-                       return alert("Approve Email 1 for every lead before starting this campaign. Open an email cell and click Approve.");
-                     }
-                     try {
-                       const res = await fetch(`/api/campaigns/${campaignId}/start-sending`, { method: "POST" });
-                       const data = await res.json();
-                       if (res.ok) alert("Campaign started! Email 1 is being sent.");
-                       else {
-                         const missing = data.missingRequirements || data.missing;
-                         if (missing && missing.length > 0) {
-                           alert(`Failed to start campaign. Missing Requirements:\n\n- ${missing.join('\n- ')}`);
-                         } else {
-                           alert(data.error || "Failed to start campaign.");
-                         }
-                       }
-                     } catch(e) { console.error(e); }
-                   }}
-                   className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors font-bold shadow-lg shadow-green-500/20"
-                 >
-                   Start Campaign
-                 </button>
+               <div className="flex items-center space-x-3">
+                 <span className={`text-xs font-bold uppercase tracking-wide px-2.5 py-1 rounded-full border ${
+                   campaignData?.status === 'Active' ? 'bg-green-500/10 text-green-400 border-green-500/30' :
+                   campaignData?.status === 'Paused' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
+                   'bg-slate-500/10 text-slate-400 border-slate-500/30'
+                 }`}>
+                   {campaignData?.status === 'Paused' ? 'Stopped' : (campaignData?.status || 'Draft')}
+                 </span>
+                 {campaignData?.status === 'Active' ? (
+                   <button
+                     onClick={handlePauseCampaign}
+                     className="px-6 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors font-bold shadow-lg shadow-amber-500/20"
+                   >
+                     Pause Campaign
+                   </button>
+                 ) : (
+                   <button
+                     onClick={handleStartCampaign}
+                     className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors font-bold shadow-lg shadow-green-500/20"
+                   >
+                     {campaignData?.status === 'Paused' ? 'Restart Campaign' : 'Start Campaign'}
+                   </button>
+                 )}
                </div>
              </div>
 
@@ -602,73 +694,108 @@ export default function CampaignDetailPage() {
              {/* Sending Account */}
              <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-6 mb-6">
                <h4 className="text-white font-bold mb-1 flex items-center gap-2">
-                 <Mail size={18} className="text-purple-400" /> Sending Account
+                 <Mail size={18} className="text-purple-400" /> Sending Account (Resend)
                </h4>
-               <p className="text-xs text-slate-400 mb-4">Emails for this campaign are sent from your own connected Gmail account, with daily limits, open/reply/bounce tracking, and unsubscribe handling built in.</p>
+               <p className="text-xs text-slate-400 mb-2">
+                 Emails for this campaign are sent through <a href="https://resend.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">Resend</a> using your own API key — one key per campaign, with daily limits, open/click tracking, and unsubscribe handling built in. The sender address must be on a domain verified in your Resend account.
+               </p>
+               <p className="text-xs text-slate-500 mb-4">
+                 <strong className="text-slate-400">Replies are captured automatically:</strong> when you save your API key, we set up reply &amp; bounce tracking (a webhook) in your Resend account for you. Just make sure your domain's DNS records from the Resend <a href="https://resend.com/domains" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">Domains page</a> are added — including the receiving MX record. Replies then appear in the Replies tab within seconds and stop that lead's follow-ups.
+               </p>
 
-               {(() => {
-                 const connected = gmailAccounts.find(a => a.id === campaignData?.gmailAccountId);
-                 if (connected) {
-                   return (
-                     <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-lg p-4">
-                       <div>
-                         <p className="text-white text-sm font-medium flex items-center gap-2">
-                           {connected.email}
-                           <span className={`text-[10px] px-1.5 py-0.5 rounded border ${connected.status === 'Active' ? 'bg-green-500/10 text-green-400 border-green-500/30' : 'bg-red-500/10 text-red-400 border-red-500/30'}`}>
-                             {connected.status}
-                           </span>
-                         </p>
-                         <p className="text-xs text-slate-500 mt-1">
-                           Daily limit: {connected.dailyLimit} emails/day
-                           {connected.lastSyncedAt ? ` · Last inbox sync: ${new Date(connected.lastSyncedAt).toLocaleString()}` : ''}
-                         </p>
-                         {connected.lastError && (
-                           <p className="text-xs text-red-400 mt-1">Last error: {connected.lastError}</p>
-                         )}
-                       </div>
-                       <button
-                         onClick={() => handleAttachGmail(null)}
-                         disabled={gmailBusy}
-                         className="text-xs text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
-                       >
-                         Detach from campaign
-                       </button>
-                     </div>
-                   );
-                 }
-                 return (
-                   <div className="flex flex-wrap items-center gap-3">
-                     <button
-                       onClick={() => window.location.href = `/api/integrations/gmail/connect?campaignId=${campaignId}`}
-                       className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors text-sm font-bold flex items-center gap-2"
-                     >
-                       <Mail size={15} /> Connect Gmail
-                     </button>
-                     {gmailAccounts.length > 0 && (
-                       <>
-                         <span className="text-xs text-slate-500">or use an already connected account:</span>
-                         <select
-                           value={selectedGmailId}
-                           onChange={e => setSelectedGmailId(e.target.value)}
-                           className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm"
-                         >
-                           <option value="">Select account...</option>
-                           {gmailAccounts.map(a => (
-                             <option key={a.id} value={a.id}>{a.email}</option>
-                           ))}
-                         </select>
-                         <button
-                           onClick={() => selectedGmailId && handleAttachGmail(selectedGmailId)}
-                           disabled={!selectedGmailId || gmailBusy}
-                           className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors text-sm font-bold disabled:opacity-50"
-                         >
-                           {gmailBusy ? "Attaching..." : "Use this account"}
-                         </button>
-                       </>
+               {campaignData?.resendConfigured && campaignData?.resendFromEmail && !resendEditing ? (
+                 <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-lg p-4">
+                   <div>
+                     <p className="text-white text-sm font-medium flex items-center gap-2">
+                       {campaignData.resendFromEmail}
+                       <span className="text-[10px] px-1.5 py-0.5 rounded border bg-green-500/10 text-green-400 border-green-500/30">
+                         Connected
+                       </span>
+                     </p>
+                     <p className="text-xs text-slate-500 mt-1">
+                       Resend API key: ••••••••{campaignData.dailyLimit ? ` · Daily limit: ${campaignData.dailyLimit} emails/day` : ' · Daily limit: 50 emails/day'}
+                       {campaignData.resendWebhookId ? ' · Reply tracking: active' : ''}
+                     </p>
+                     {!campaignData.resendWebhookId && (
+                       <p className="text-xs text-amber-400/90 mt-1">
+                         Reply tracking is not set up yet — click Edit and re-save your API key (the app URL must be public, e.g. your ngrok or deployed domain).
+                       </p>
                      )}
                    </div>
-                 );
-               })()}
+                   <div className="flex items-center gap-3">
+                     <button
+                       onClick={() => {
+                         setResendFromInput(campaignData.resendFromEmail || "");
+                         setResendKeyInput("");
+                         setResendEditing(true);
+                       }}
+                       disabled={resendBusy}
+                       className="text-xs text-slate-300 hover:text-white transition-colors disabled:opacity-50"
+                     >
+                       Edit
+                     </button>
+                     <button
+                       onClick={handleDisconnectResend}
+                       disabled={resendBusy}
+                       className="text-xs text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+                     >
+                       Remove
+                     </button>
+                   </div>
+                 </div>
+               ) : (
+                 <div className="space-y-3">
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                     <div>
+                       <label className="block text-xs text-slate-400 mb-1.5">Resend API key {campaignData?.resendConfigured ? '(leave blank to keep current key)' : ''}</label>
+                       <input
+                         type="password"
+                         value={resendKeyInput}
+                         onChange={e => setResendKeyInput(e.target.value)}
+                         placeholder="re_..."
+                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-purple-500 outline-none"
+                       />
+                     </div>
+                     <div>
+                       <label className="block text-xs text-slate-400 mb-1.5">Send emails from</label>
+                       <input
+                         type="email"
+                         value={resendFromInput}
+                         onChange={e => setResendFromInput(e.target.value)}
+                         placeholder="you@yourdomain.com"
+                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-purple-500 outline-none"
+                       />
+                     </div>
+                   </div>
+                   <div className="flex items-center gap-3">
+                     <button
+                       onClick={handleSaveResend}
+                       disabled={resendBusy}
+                       className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors text-sm font-bold flex items-center gap-2 disabled:opacity-50"
+                     >
+                       {resendBusy ? <Loader2 className="animate-spin" size={15} /> : <Mail size={15} />}
+                       {resendBusy ? "Saving..." : "Save Sending Account"}
+                     </button>
+                     {resendEditing && (
+                       <button
+                         onClick={() => { setResendEditing(false); setResendKeyInput(""); setResendFromInput(""); }}
+                         disabled={resendBusy}
+                         className="text-xs text-slate-400 hover:text-white transition-colors"
+                       >
+                         Cancel
+                       </button>
+                     )}
+                     <a
+                       href="https://resend.com/api-keys"
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                     >
+                       Get an API key from the Resend dashboard →
+                     </a>
+                   </div>
+                 </div>
+               )}
              </div>
 
              {campaignLeads.filter(cl => !cl.lead.email || cl.lead.emailStatus === 'Missing').length > 0 && (
@@ -688,8 +815,8 @@ export default function CampaignDetailPage() {
                </h4>
                <ul className="space-y-2 text-sm text-slate-300">
                  <li className="flex items-center gap-2">
-                   {campaignData?.gmailAccountId ? <Check size={16} className="text-green-500" /> : <X size={16} className="text-red-500" />}
-                   Connect a Gmail sending account
+                   {campaignData?.resendConfigured && campaignData?.resendFromEmail ? <Check size={16} className="text-green-500" /> : <X size={16} className="text-red-500" />}
+                   Add a Resend API key &amp; sender email
                  </li>
                  <li className="flex items-center gap-2">
                    {campaignLeads.length > 0 ? <Check size={16} className="text-green-500" /> : <X size={16} className="text-red-500" />}
@@ -797,6 +924,15 @@ export default function CampaignDetailPage() {
                  >
                    {bulkApproving ? <Loader2 className="animate-spin" size={13} /> : <Check size={13} />}
                    {bulkApproving ? "Approving..." : `Approve All Emails (${selectedLeadIds.length} leads)`}
+                 </button>
+                 <button
+                   onClick={handleStartSequenceForLeads}
+                   disabled={selectedLeadIds.length === 0 || startingLeads}
+                   title="Queue the approved emails for the selected leads and start sending their sequence"
+                   className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded transition-colors shadow-lg shadow-purple-500/20 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                 >
+                   {startingLeads ? <Loader2 className="animate-spin" size={13} /> : <Send size={13} />}
+                   {startingLeads ? "Starting..." : `Start Sequence (${selectedLeadIds.length} leads)`}
                  </button>
                </div>
              </div>
@@ -1013,6 +1149,13 @@ function CampaignBookedMeetingsTab({
     setSyncing(false);
   };
 
+  const now = Date.now();
+  const visibleMeetings = meetings.filter((call) => {
+    const date = call.callDate || call.createdAt;
+    if (!date) return true;
+    return new Date(date).getTime() >= now;
+  });
+
   return (
     <div className="space-y-6 animate-in fade-in">
       <div className="glass rounded-2xl border border-slate-700/50 overflow-hidden">
@@ -1020,7 +1163,7 @@ function CampaignBookedMeetingsTab({
           <div className="flex items-center gap-2">
             <Calendar size={18} className="text-emerald-400" />
             <h3 className="text-lg font-bold text-white">Booked Meetings</h3>
-            <span className="text-sm text-slate-500">({meetings.length})</span>
+            <span className="text-sm text-slate-500">({visibleMeetings.length})</span>
           </div>
           <button
             type="button"
@@ -1044,7 +1187,7 @@ function CampaignBookedMeetingsTab({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {meetings.length === 0 ? (
+              {visibleMeetings.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-6 py-16 text-center">
                     <div className="flex flex-col items-center justify-center">
@@ -1059,7 +1202,7 @@ function CampaignBookedMeetingsTab({
                   </td>
                 </tr>
               ) : (
-                meetings.map((call) => (
+                visibleMeetings.map((call) => (
                   <tr key={call.id} className="hover:bg-slate-800/40 transition-colors">
                     <td className="px-6 py-4">
                       <div className="font-medium text-white">{contactName(call.lead)}</div>
@@ -1140,20 +1283,11 @@ function CampaignRepliesTab({ campaignLeads, replies, onRefresh }: { campaignLea
   const [sending, setSending] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
+  // Replies arrive automatically via the Resend webhook — this just refetches.
   const syncInbox = async () => {
     setSyncing(true);
     try {
-      const res = await fetch('/api/email/poll-replies');
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || 'Failed to sync inbox');
-      } else {
-        const count = data.processedCount || 0;
-        if (count > 0) alert(`Synced ${count} new reply${count === 1 ? '' : 'ies'}.`);
-        onRefresh();
-      }
-    } catch {
-      alert('Error syncing inbox');
+      await onRefresh();
     } finally {
       setSyncing(false);
     }
@@ -1215,8 +1349,9 @@ function CampaignRepliesTab({ campaignLeads, replies, onRefresh }: { campaignLea
         <MessageSquare size={40} className="text-slate-600 mx-auto mb-4" />
         <h3 className="text-lg text-white mb-2">No replies yet.</h3>
         <p className="text-slate-400 text-sm max-w-md mx-auto mb-6">
-          When a prospect replies to a campaign email, the conversation will appear here.
-          AI classifies their intent and drafts a contextual response you can review and send.
+          When a prospect replies to a campaign email, it arrives here automatically via your
+          Resend reply tracking. AI classifies their intent and drafts a contextual response
+          you can review and send.
         </p>
         <button
           onClick={syncInbox}
@@ -1224,7 +1359,7 @@ function CampaignRepliesTab({ campaignLeads, replies, onRefresh }: { campaignLea
           className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
         >
           <RefreshCw size={15} className={syncing ? 'animate-spin' : ''} />
-          {syncing ? 'Syncing…' : 'Sync Inbox'}
+          {syncing ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
     );
@@ -1241,11 +1376,11 @@ function CampaignRepliesTab({ campaignLeads, replies, onRefresh }: { campaignLea
           <button
             onClick={syncInbox}
             disabled={syncing}
-            title="Sync Gmail inbox for new replies"
+            title="Refresh conversations"
             className="text-xs text-slate-400 hover:text-white flex items-center gap-1.5 px-2 py-1 rounded border border-slate-700 hover:border-slate-500 transition-colors disabled:opacity-50"
           >
             <RefreshCw size={12} className={syncing ? 'animate-spin' : ''} />
-            Sync
+            Refresh
           </button>
         </div>
         {conversations.map(conv => {
@@ -1323,7 +1458,7 @@ function CampaignRepliesTab({ campaignLeads, replies, onRefresh }: { campaignLea
               value={replyText}
               onChange={e => setReplyText(e.target.value)}
               rows={3}
-              placeholder={`Reply to ${activeLead?.firstName || 'this prospect'}... (sent from your connected Gmail)`}
+              placeholder={`Reply to ${activeLead?.firstName || 'this prospect'}... (sent from your campaign's sender email)`}
               className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-purple-500 outline-none resize-none"
             />
             <button

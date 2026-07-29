@@ -69,6 +69,12 @@ export default function BookedCallsPage() {
     }
   };
 
+  const now = Date.now();
+  const visibleCalls = calls.filter((call) => {
+    if (!call.callDate) return true;
+    return new Date(call.callDate).getTime() >= now;
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-end">
@@ -126,7 +132,7 @@ export default function BookedCallsPage() {
                     Loading...
                   </td>
                 </tr>
-              ) : calls.length === 0 ? (
+              ) : visibleCalls.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-6 py-16 text-center">
                     <div className="flex flex-col items-center justify-center">
@@ -141,7 +147,7 @@ export default function BookedCallsPage() {
                   </td>
                 </tr>
               ) : (
-                calls.map((call) => (
+                visibleCalls.map((call) => (
                   <tr key={call.id} className="hover:bg-slate-800/30 transition-colors">
                     <td className="px-6 py-4">
                       <div className="font-medium text-white">{call.lead?.businessName || call.lead?.firstName || 'Unknown'}</div>

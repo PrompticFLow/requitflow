@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { encrypt } from '@/lib/encryption';
+import { validateResendApiKey, ensureResendWebhook } from '@/lib/resend';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -41,7 +43,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       prisma.emailSequence.count({ where: { campaignId: id, sequenceStep: 1, approvalStatus: 'Approved' } }),
     ]);
 
-    return NextResponse.json({ campaign: { ...campaign, totalDrafts, pendingReview, approvedEmail1 } });
+    // Never expose the encrypted Resend API key — only whether one is set
+    const { resendApiKeyEncrypted, resendWebhookSecretEncrypted, ...safeCampaign } = campaign as any;
+
+    return NextResponse.json({
+      campaign: {
+        ...safeCampaign,
+        resendConfigured: !!resendApiKeyEncrypted,
+        totalDrafts,
+        pendingReview,
+        approvedEmail1
+      }
+    });
   } catch (error: any) {
     console.error('Fetch campaign error:', error);
     return NextResponse.json({ error: 'Something went wrong while loading this campaign. Please try again.' }, { status: 500 });
@@ -75,7 +88,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       'knowledgeBaseMode', 'selectedKnowledgeBaseFileIds',
       'personalizationLevel', 'personalizationStyle', 'mentionCompanyName',
       'companyFallback', 'useKnowledgeBase', 'emailLength', 'spamSafety', 'ctaStyle',
-      'autoReplyEnabled', 'autoReplyMode', 'gmailAccountId'
+      'autoReplyEnabled', 'autoReplyMode', 'resendFromEmail'
     ];
 
     for (const field of editableFields) {
@@ -83,6 +96,56 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         updateData[field] = data[field];
       }
     }
+
+    // Resend API key: stored encrypted, one key per campaign.
+    // Pass a plain key to set/replace it, or null to disconnect the sender.
+    let webhookAutoSetup: 'created' | 'skipped-localhost' | 'failed' | null = null;
+    if (data.resendApiKey !== undefined) {
+      if (data.resendApiKey === null || data.resendApiKey === '') {
+        updateData.resendApiKeyEncrypted = null;
+        updateData.resendWebhookId = null;
+        updateData.resendWebhookSecretEncrypted = null;
+      } else {
+        const apiKey = String(data.resendApiKey).trim();
+        if (!apiKey.startsWith('re_')) {
+          return NextResponse.json({ error: 'That does not look like a Resend API key (it should start with "re_").' }, { status: 400 });
+        }
+        const validation = await validateResendApiKey(apiKey);
+        if (!validation.valid) {
+          return NextResponse.json({ error: validation.error }, { status: 400 });
+        }
+        updateData.resendApiKeyEncrypted = encrypt(apiKey);
+
+        // Auto-configure reply capture: create the inbound webhook in the
+        // customer's Resend account so replies/bounces flow back to us with
+        // zero manual setup. Best-effort — never blocks saving the key.
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
+        if (!appUrl || /localhost|127\.0\.0\.1/.test(appUrl)) {
+          webhookAutoSetup = 'skipped-localhost';
+        } else {
+          const webhook = await ensureResendWebhook(apiKey, `${appUrl.replace(/\/$/, '')}/api/webhooks/resend`);
+          if (webhook) {
+            updateData.resendWebhookId = webhook.webhookId;
+            if (webhook.signingSecret) {
+              updateData.resendWebhookSecretEncrypted = encrypt(webhook.signingSecret);
+            }
+            webhookAutoSetup = 'created';
+          } else {
+            webhookAutoSetup = 'failed';
+          }
+        }
+      }
+    }
+
+    if (updateData.resendFromEmail) {
+      const email = String(updateData.resendFromEmail).trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return NextResponse.json({ error: 'Please enter a valid sender email address.' }, { status: 400 });
+      }
+      updateData.resendFromEmail = email;
+    }
+
+
 
     if (updateData.emailSequenceCount !== undefined) {
       updateData.emailSequenceCount = parseInt(String(updateData.emailSequenceCount)) || 4;
@@ -100,7 +163,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       data: updateData
     });
 
-    return NextResponse.json({ campaign });
+    const { resendApiKeyEncrypted, resendWebhookSecretEncrypted, ...safeCampaign } = campaign as any;
+    return NextResponse.json({
+      campaign: { ...safeCampaign, resendConfigured: !!resendApiKeyEncrypted },
+      ...(webhookAutoSetup ? { webhookAutoSetup } : {})
+    });
   } catch (error: any) {
     console.error('Update campaign error:', error);
     return NextResponse.json({ error: 'Something went wrong while saving your campaign. Please try again.' }, { status: 500 });

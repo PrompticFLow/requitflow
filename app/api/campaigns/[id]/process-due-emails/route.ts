@@ -6,7 +6,7 @@ import { processDueEmails } from '@/lib/email-dispatch';
 export const maxDuration = 300;
 
 // Manual "process now" trigger for a campaign. The same pipeline runs
-// unattended via /api/cron/gmail-sync — this endpoint just lets the UI
+// unattended via /api/cron/send-due-emails — this endpoint just lets the UI
 // nudge it immediately instead of waiting for the next cron tick.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();

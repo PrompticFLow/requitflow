@@ -1,5 +1,6 @@
 import sgMail from '@sendgrid/mail';
 import { prisma } from '@/lib/prisma';
+import { fillMergeTags } from '@/lib/email/fill-merge-tags';
 
 export interface SendCampaignEmailOptions {
   to: string;
@@ -71,6 +72,13 @@ export async function sendCampaignEmail({
   if (emailSequence.userId !== user.id || emailSequence.campaignId !== campaign.id) {
     return { success: false, error: "Email sequence does not belong to the correct user or campaign." };
   }
+
+  // Fill any merge tags the AI left in ({{firstName}}, {{painPoints}}, …) so
+  // raw placeholders never reach a prospect's inbox.
+  const mergeCtx = { lead, campaign, user };
+  subject = fillMergeTags(subject, mergeCtx);
+  html = fillMergeTags(html, mergeCtx);
+  if (text) text = fillMergeTags(text, mergeCtx);
 
   // Campaign checks
   if (campaign.status !== 'Active' && campaign.status !== 'Draft') {

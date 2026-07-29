@@ -117,28 +117,13 @@ export default function RepliesPage() {
           </button>
           
           <button
-            onClick={async () => {
-              setLoading(true);
-              try {
-                const res = await fetch("/api/email/poll-replies");
-                const data = await res.json();
-                if (res.ok) {
-                  alert(`Synced successfully! Found ${data.processedCount || 0} new replies.`);
-                  fetchReplies();
-                } else {
-                  alert(data.error || "Failed to sync replies");
-                }
-              } catch (err) {
-                alert("Error syncing replies");
-              } finally {
-                setLoading(false);
-              }
-            }}
+            onClick={() => fetchReplies()}
             disabled={loading}
+            title="Replies arrive automatically via Resend reply tracking"
             className="flex items-center space-x-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium transition-colors border border-slate-700 disabled:opacity-50"
           >
             <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-            <span>Sync Inbox</span>
+            <span>Refresh</span>
           </button>
         </div>
       </div>

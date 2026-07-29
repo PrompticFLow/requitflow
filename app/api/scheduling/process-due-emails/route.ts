@@ -20,7 +20,9 @@ export async function POST(req: Request) {
         campaign: { status: 'Active' },
         lead: {
           email: { not: null },
-          status: { notIn: ['Replied', 'Unsubscribed', 'Booked'] }
+          // 'Replied' is intentionally not filtered here: a reply only stops
+          // the campaign it happened in (checked per-campaign below).
+          status: { notIn: ['Unsubscribed', 'Booked'] }
         }
       },
       include: {
@@ -44,13 +46,30 @@ export async function POST(req: Request) {
         continue;
       }
 
-      // Check if lead replied, unsubscribed, or booked a call to prevent sending (extra safety check though DB query filters it)
-      if (email.lead.status === 'Replied' || email.lead.status === 'Unsubscribed' || email.lead.status === 'Booked') {
+      // Check if lead unsubscribed or booked a call to prevent sending (extra safety check though DB query filters it)
+      if (email.lead.status === 'Unsubscribed' || email.lead.status === 'Booked') {
         await prisma.emailSequence.update({
           where: { id: email.id },
           data: { status: 'Stopped', timingReason: `Stopped due to lead status: ${email.lead.status}` }
         });
         results.push({ id: email.id, status: 'stopped', reason: email.lead.status });
+        continue;
+      }
+
+      // A reply stops sequences only in the campaign it was received in
+      const repliedInCampaign = await prisma.emailReply.findFirst({
+        where: {
+          leadId: email.leadId,
+          OR: [{ campaignId: email.campaignId }, { campaignId: null }]
+        },
+        select: { id: true }
+      });
+      if (repliedInCampaign) {
+        await prisma.emailSequence.update({
+          where: { id: email.id },
+          data: { status: 'Stopped', timingReason: 'Stopped because lead replied in this campaign' }
+        });
+        results.push({ id: email.id, status: 'stopped', reason: 'Replied in this campaign' });
         continue;
       }
 

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import nodemailer from 'nodemailer';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
 import sgMail from '@sendgrid/mail';
+import { sendViaResend, getCampaignResendSender } from '@/lib/resend';
 import { buildReplySubject } from '@/lib/email/reply-subject';
 
 export const maxDuration = 300;
@@ -43,6 +44,8 @@ export async function GET(req: Request) {
       }
 
       try {
+        const resendSender = getCampaignResendSender(reply.campaign as any);
+
         const smtpAccount = await prisma.smtpAccount.findUnique({
           where: { userId: reply.userId }
         });
@@ -52,10 +55,10 @@ export async function GET(req: Request) {
         const sendgridFromEmail = process.env.SENDGRID_FROM_EMAIL;
         const hasSendGrid = !!(sendgridApiKey && sendgridFromEmail);
 
-        if (!hasVerifiedSmtp && !hasSendGrid) {
+        if (!resendSender && !hasVerifiedSmtp && !hasSendGrid) {
           await prisma.emailReply.update({
             where: { id: reply.id },
-            data: { aiReplyStatus: 'Failed (No SMTP)' }
+            data: { aiReplyStatus: 'Failed (No Sender)' }
           });
           failedCount++;
           continue;
@@ -71,7 +74,23 @@ export async function GET(req: Request) {
 
         let sentMessageId = '';
 
-        if (hasVerifiedSmtp) {
+        if (resendSender) {
+          const headers: Record<string, string> = {};
+          if (storedMessageId) {
+            headers['In-Reply-To'] = storedMessageId;
+            headers['References'] = storedMessageId;
+          }
+          const info = await sendViaResend(resendSender.apiKey, {
+            to: to as string,
+            subject: emailSubject,
+            html: emailBody,
+            fromEmail: resendSender.fromEmail,
+            fromName: reply.campaign.senderName || reply.user.name || undefined,
+            replyTo: (reply.campaign as any).resendReplyTo || resendSender.fromEmail,
+            headers,
+          });
+          sentMessageId = info.messageId || '';
+        } else if (hasVerifiedSmtp) {
           const password = decryptSmtpPass(smtpAccount.smtpPassEncrypted);
           const username = decryptSmtpPass(smtpAccount.smtpUserEncrypted);
 

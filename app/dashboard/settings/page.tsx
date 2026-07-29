@@ -45,20 +45,6 @@ export default function SettingsPage() {
   const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const [smtpStatus, setSmtpStatus] = useState<any>({ isVerified: false, status: 'Unknown' });
 
-  // IMAP Settings State
-  const [imapData, setImapData] = useState({
-    imapHost: '',
-    imapPort: '993',
-    imapSecure: true,
-    imapUsername: '',
-    imapPassword: '',
-    imapEnabled: false
-  });
-  const [hasImapPassword, setHasImapPassword] = useState(false);
-  const [imapLoading, setImapLoading] = useState(true);
-  const [imapSaving, setImapSaving] = useState(false);
-  const [imapTesting, setImapTesting] = useState(false);
-  const [imapStatus, setImapStatus] = useState<any>({ isVerified: false, status: 'Unknown' });
 
   // Calendly State
   const [calendlyData, setCalendlyData] = useState<{
@@ -163,25 +149,6 @@ export default function SettingsPage() {
     };
     loadSmtp();
 
-    fetch("/api/settings/imap")
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.success && data.imap) {
-          const imap = data.imap;
-          setImapData({
-            imapHost: imap.imapHost || '',
-            imapPort: imap.imapPort ? imap.imapPort.toString() : '993',
-            imapSecure: imap.imapSecure !== undefined ? imap.imapSecure : true,
-            imapUsername: imap.imapUsername || '',
-            imapPassword: '',
-            imapEnabled: imap.imapEnabled || false
-          });
-          setHasImapPassword(imap.hasPassword);
-          setImapStatus({ isVerified: imap.imapVerified, status: imap.imapVerified ? 'Active' : 'Failed' });
-        }
-      })
-      .catch(console.error)
-      .finally(() => setImapLoading(false));
 
     fetch("/api/integrations/calendly/status")
       .then((res) => res.json())
@@ -353,51 +320,6 @@ export default function SettingsPage() {
       alert("An error occurred while sending test email.");
     }
     setSendingTestEmail(false);
-  };
-
-  const handleSaveImap = async () => {
-    setImapSaving(true);
-    try {
-      const res = await fetch("/api/settings/imap", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(imapData)
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        alert("IMAP settings saved successfully.");
-        setHasImapPassword(true);
-        setImapData(prev => ({ ...prev, imapPassword: '' }));
-        setImapStatus({ isVerified: false, status: 'Active' });
-      } else {
-        alert(data.error || "Failed to save IMAP settings.");
-      }
-    } catch (e) {
-      alert("An error occurred while saving IMAP settings.");
-    }
-    setImapSaving(false);
-  };
-
-  const handleTestImap = async () => {
-    setImapTesting(true);
-    try {
-      const res = await fetch("/api/settings/imap/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(imapData)
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        alert("Success: " + data.message);
-        setImapStatus({ isVerified: true, status: 'Active' });
-      } else {
-        alert("Error: " + data.error);
-        setImapStatus({ isVerified: false, status: 'Failed' });
-      }
-    } catch (e) {
-      alert("An error occurred while testing IMAP connection.");
-    }
-    setImapTesting(false);
   };
 
   const handleDisconnectCalendly = async () => {
@@ -731,102 +653,6 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
-          {/* Inbox Reply Capture Card */}
-          <div className="glass p-8 rounded-2xl border border-slate-700/50 space-y-6 break-inside-avoid mb-6">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <div className="flex items-center space-x-3">
-                <Mail className="text-purple-400" size={24} />
-                <h3 className="text-xl font-bold text-white">Inbox Reply Capture</h3>
-              </div>
-              {imapStatus.isVerified && imapData.imapEnabled && (
-                <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs rounded border border-green-500/30 flex items-center space-x-1">
-                  <Check size={14} /> <span>Reply Capture Verified</span>
-                </span>
-              )}
-              {(!imapStatus.isVerified || !imapData.imapEnabled) && (
-                <span className="px-2 py-1 bg-yellow-500/20 text-yellow-400 text-xs rounded border border-yellow-500/30">
-                  Reply Capture Not Verified
-                </span>
-              )}
-            </div>
-
-            <p className="text-sm text-slate-400 leading-relaxed mb-4">
-              Enable IMAP polling so the app can fetch, triage, and reply to inbound cold email responses automatically from your inbox.
-            </p>
-
-            <div className="flex items-center space-x-2 pb-4">
-              <input 
-                type="checkbox" 
-                id="imapEnabled" 
-                checked={imapData.imapEnabled} 
-                onChange={e => setImapData({...imapData, imapEnabled: e.target.checked})} 
-                className="w-4 h-4 rounded border-slate-600 bg-slate-900 cursor-pointer" 
-              />
-              <label htmlFor="imapEnabled" className="text-sm font-semibold text-slate-200 cursor-pointer">
-                Enable reply capture via IMAP
-              </label>
-            </div>
-
-            {imapData.imapEnabled && (
-              <>
-                <div className="bg-slate-800/50 p-4 rounded-lg text-xs text-slate-300 space-y-2 border border-slate-700">
-                  <p className="font-medium text-slate-200">Gmail / Google Workspace Helper:</p>
-                  <p className="text-slate-400">
-                    Use <strong>imap.gmail.com</strong>, port <strong>993</strong>, secure <strong>true</strong>, and the same <strong>Google App Password</strong>.
-                  </p>
-                </div>
-
-                {imapLoading ? (
-                  <div className="flex justify-center py-6"><Loader2 className="animate-spin text-purple-500" /></div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="space-y-1 col-span-2">
-                        <label className="text-sm font-medium text-slate-400">IMAP Host</label>
-                        <input type="text" value={imapData.imapHost} onChange={e => setImapData({...imapData, imapHost: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500" placeholder="imap.gmail.com" />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-sm font-medium text-slate-400">Port</label>
-                        <input type="text" value={imapData.imapPort} onChange={e => setImapData({...imapData, imapPort: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500" placeholder="993" />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <label className="text-sm font-medium text-slate-400">IMAP Username</label>
-                        <input type="text" value={imapData.imapUsername} onChange={e => setImapData({...imapData, imapUsername: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500" placeholder="user@gmail.com" />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-sm font-medium text-slate-400">IMAP Password</label>
-                        <input type="password" value={imapData.imapPassword} onChange={e => setImapData({...imapData, imapPassword: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500" placeholder={hasImapPassword ? "Saved password hidden. Replace..." : ""} />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <input type="checkbox" id="imapSecure" checked={imapData.imapSecure} onChange={e => setImapData({...imapData, imapSecure: e.target.checked})} className="w-4 h-4 rounded border-slate-600 bg-slate-900 cursor-pointer" />
-                      <label htmlFor="imapSecure" className="text-sm font-medium text-slate-400 cursor-pointer">Use SSL / Secure TLS</label>
-                    </div>
-
-                    <div className="flex space-x-3 pt-2">
-                      <button onClick={handleSaveImap} disabled={imapSaving} className="flex-1 px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition-colors shadow-lg flex items-center justify-center gap-2">
-                        {imapSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />} Save IMAP Settings
-                      </button>
-                      <button onClick={handleTestImap} disabled={imapTesting || (!hasImapPassword && !imapData.imapPassword)} className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium transition-colors border border-slate-700 flex items-center justify-center gap-2">
-                        {imapTesting ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />} Test IMAP
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {!imapData.imapEnabled && (
-              <button onClick={handleSaveImap} disabled={imapSaving} className="w-full px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition-colors shadow-lg flex items-center justify-center gap-2">
-                {imapSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />} Save Changes
-              </button>
-            )}
-          </div>
-
           {/* Safety & Anti-Ban Settings */}
           <div className="glass p-8 rounded-2xl border border-slate-700/50 space-y-6 break-inside-avoid mb-6">
             <div className="flex items-center space-x-3 border-b border-slate-800 pb-4">
