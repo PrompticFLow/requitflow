@@ -8,6 +8,12 @@ import {
   regenerateStepForLead,
 } from '@/services/email-sequence-generator';
 import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
+import {
+  parseHtmlEmailTemplates,
+  validateHtmlTemplatesForSteps,
+  applyHtmlTemplateForLead,
+  htmlTemplateDelayDays,
+} from '@/lib/email/html-templates';
 
 export const maxDuration = 300;
 
@@ -25,16 +31,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const { id: campaignId } = await params;
 
-  let openRouterApiKey: string;
-  try {
-    openRouterApiKey = await resolveUserApiKey(user.id, 'openrouter');
-  } catch (e: any) {
-    if (e instanceof ByokKeyMissingError) {
-      return NextResponse.json({ error: e.message }, { status: 400 });
-    }
-    throw e;
-  }
-
   try {
     const body = await req.json().catch(() => ({}));
     const { leadIds: providedLeadIds, leadId, step } = body;
@@ -46,6 +42,29 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const senderName = campaign.senderName || user.name || '';
     const stepCount = sequenceStepCount(campaign);
+    const isHtmlMode = (campaign.emailBodyMode || 'ai') === 'html';
+    const htmlTemplates = parseHtmlEmailTemplates(campaign.htmlEmailTemplates);
+
+    if (isHtmlMode) {
+      const validation = validateHtmlTemplatesForSteps(htmlTemplates, stepCount);
+      if (!validation.ok) {
+        return NextResponse.json({ error: validation.error }, { status: 400 });
+      }
+    }
+
+    let openRouterApiKey: string | null = null;
+    if (!isHtmlMode) {
+      try {
+        openRouterApiKey = await resolveUserApiKey(user.id, 'openrouter');
+      } catch (e: any) {
+        if (e instanceof ByokKeyMissingError) {
+          return NextResponse.json({ error: e.message }, { status: 400 });
+        }
+        throw e;
+      }
+    }
+
+    const mergeCtx = (lead: any) => ({ lead, campaign, user });
 
     // ─── Single-step regeneration ─────────────────────────────────────────────
     if (leadId && step) {
@@ -62,27 +81,64 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         orderBy: { sequenceStep: 'asc' }
       });
 
-      const generated = await regenerateStepForLead(campaign, lead, senderName, stepNum, stepCount, existing, openRouterApiKey);
+      let data: Record<string, any>;
+
+      if (isHtmlMode) {
+        const template = htmlTemplates[String(stepNum)];
+        const applied = applyHtmlTemplateForLead(template, mergeCtx(lead));
+        const delayAmount =
+          existing.find(e => e.sequenceStep === stepNum)?.delayAmount ??
+          htmlTemplateDelayDays(lead, stepNum, stepCount);
+        data = {
+          name: `Email ${stepNum}`,
+          subject: applied.subject,
+          body: applied.body,
+          aiOriginalSubject: applied.subject,
+          aiOriginalBody: applied.body,
+          emailType: 'HTML Template',
+          delayAmount,
+          delayUnit: 'business_days',
+          status: 'Draft',
+          approvalStatus: 'Pending',
+          aiGenerationReason: `Applied HTML template with merge tags — ${trackLabel(lead)}`,
+        };
+      } else {
+        const generated = await regenerateStepForLead(
+          campaign,
+          lead,
+          senderName,
+          stepNum,
+          stepCount,
+          existing,
+          openRouterApiKey!
+        );
+        data = {
+          name: `Email ${stepNum}`,
+          subject: generated.subject,
+          body: generated.body,
+          aiOriginalSubject: generated.subject,
+          aiOriginalBody: generated.body,
+          emailType: generated.type || null,
+          delayAmount: generated.delayDays,
+          delayUnit: 'business_days',
+          status: 'Draft',
+          approvalStatus: 'Pending',
+          aiGenerationReason: `Regenerated from lead research data — ${trackLabel(lead)}`,
+        };
+      }
 
       const target = existing.find(e => e.sequenceStep === stepNum);
-      const data = {
-        name: `Email ${stepNum}`,
-        subject: generated.subject,
-        body: generated.body,
-        aiOriginalSubject: generated.subject,
-        aiOriginalBody: generated.body,
-        emailType: generated.type || null,
-        delayAmount: generated.delayDays,
-        delayUnit: 'business_days',
-        status: 'Draft',
-        approvalStatus: 'Pending',
-        aiGenerationReason: `Regenerated from lead research data — ${trackLabel(lead)}`,
-      };
-
       const email = target
         ? await prisma.emailSequence.update({ where: { id: target.id }, data })
         : await prisma.emailSequence.create({
-            data: { ...data, userId: user.id, campaignId, leadId, sequenceStep: stepNum, ctaLink: campaign.bookingLink || campaign.ctaLink || '' }
+            data: {
+              ...data,
+              userId: user.id,
+              campaignId,
+              leadId,
+              sequenceStep: stepNum,
+              ctaLink: campaign.bookingLink || campaign.ctaLink || '',
+            }
           });
 
       return NextResponse.json({ success: true, email });
@@ -121,32 +177,67 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
         if (missingSteps.length === 0) return { skipped: true };
 
-        const emails = await generateSequenceForLead(campaign, lead, senderName, stepCount, openRouterApiKey);
-
         let created = 0;
-        for (const email of emails) {
-          if (!missingSteps.includes(email.step)) continue;
-          await prisma.emailSequence.create({
-            data: {
-              userId: user.id,
-              campaignId,
-              leadId: lead.id,
-              name: `Email ${email.step}`,
-              subject: email.subject,
-              body: email.body,
-              sequenceStep: email.step,
-              ctaLink: campaign.bookingLink || campaign.ctaLink || '',
-              delayAmount: email.delayDays,
-              delayUnit: 'business_days',
-              status: 'Draft',
-              approvalStatus: 'Pending',
-              aiOriginalSubject: email.subject,
-              aiOriginalBody: email.body,
-              emailType: email.type || null,
-              aiGenerationReason: `Generated from lead research data — ${trackLabel(lead)}`,
-            }
-          });
-          created++;
+
+        if (isHtmlMode) {
+          for (const stepNum of missingSteps) {
+            const template = htmlTemplates[String(stepNum)];
+            const applied = applyHtmlTemplateForLead(template, mergeCtx(lead));
+            await prisma.emailSequence.create({
+              data: {
+                userId: user.id,
+                campaignId,
+                leadId: lead.id,
+                name: `Email ${stepNum}`,
+                subject: applied.subject,
+                body: applied.body,
+                sequenceStep: stepNum,
+                ctaLink: campaign.bookingLink || campaign.ctaLink || '',
+                delayAmount: htmlTemplateDelayDays(lead, stepNum, stepCount),
+                delayUnit: 'business_days',
+                status: 'Draft',
+                approvalStatus: 'Pending',
+                aiOriginalSubject: applied.subject,
+                aiOriginalBody: applied.body,
+                emailType: 'HTML Template',
+                aiGenerationReason: `Applied HTML template with merge tags — ${trackLabel(lead)}`,
+              }
+            });
+            created++;
+          }
+        } else {
+          const emails = await generateSequenceForLead(
+            campaign,
+            lead,
+            senderName,
+            stepCount,
+            openRouterApiKey!
+          );
+
+          for (const email of emails) {
+            if (!missingSteps.includes(email.step)) continue;
+            await prisma.emailSequence.create({
+              data: {
+                userId: user.id,
+                campaignId,
+                leadId: lead.id,
+                name: `Email ${email.step}`,
+                subject: email.subject,
+                body: email.body,
+                sequenceStep: email.step,
+                ctaLink: campaign.bookingLink || campaign.ctaLink || '',
+                delayAmount: email.delayDays,
+                delayUnit: 'business_days',
+                status: 'Draft',
+                approvalStatus: 'Pending',
+                aiOriginalSubject: email.subject,
+                aiOriginalBody: email.body,
+                emailType: email.type || null,
+                aiGenerationReason: `Generated from lead research data — ${trackLabel(lead)}`,
+              }
+            });
+            created++;
+          }
         }
 
         await prisma.campaignLead.update({
@@ -178,7 +269,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       }, { status: 500 });
     }
 
-    let message = `Created ${generatedCount} email drafts.`;
+    let message = isHtmlMode
+      ? `Applied HTML templates to create ${generatedCount} email drafts.`
+      : `Created ${generatedCount} email drafts.`;
     if (skippedCount > 0) message += ` ${skippedCount} leads already had full sequences.`;
     if (failedCount > 0) message += ` ${failedCount} leads failed.`;
 

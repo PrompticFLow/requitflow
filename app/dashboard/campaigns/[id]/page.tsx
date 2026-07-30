@@ -2,9 +2,20 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Loader2, Mail, Users, Check, RefreshCw, Save, AlertTriangle, CheckCircle2, X, Search, Pencil, MessageSquare, Send, ArrowLeft, Calendar, ExternalLink } from "lucide-react";
+import { Loader2, Mail, Users, Check, RefreshCw, Save, AlertTriangle, CheckCircle2, X, Search, Pencil, MessageSquare, Send, ArrowLeft, Calendar, ExternalLink, Upload, FileCode } from "lucide-react";
 import { extractLatestReplyText } from "@/lib/email/strip-quoted-reply";
 
+const HTML_MERGE_TAG_HINTS = [
+  '{{firstName}}',
+  '{{companyName}}',
+  '{{jobTitle}}',
+  '{{industry}}',
+  '{{yourName}}',
+  '{{bookingLink}}',
+  '{{cta}}',
+];
+
+type HtmlStepTemplateDraft = { subject: string; html: string; fileName?: string };
 export default function CampaignDetailPage() {
   const params = useParams();
   const campaignId = params.id as string;
@@ -40,6 +51,11 @@ export default function CampaignDetailPage() {
   const [bulkApproving, setBulkApproving] = useState(false);
   const [startingLeads, setStartingLeads] = useState(false);
   const [editLeadModal, setEditLeadModal] = useState<any | null>(null);
+
+  // HTML email template mode
+  const [emailBodyMode, setEmailBodyMode] = useState<'ai' | 'html'>('ai');
+  const [htmlTemplatesDraft, setHtmlTemplatesDraft] = useState<Record<string, HtmlStepTemplateDraft>>({});
+  const [savingHtmlTemplates, setSavingHtmlTemplates] = useState(false);
 
   // Offer editing state
   const [editingOffer, setEditingOffer] = useState(false);
@@ -156,6 +172,104 @@ export default function CampaignDetailPage() {
   const seqStepCount = campaignData?.emailSequenceCount > 0 ? Math.min(campaignData.emailSequenceCount, 10) : 4;
   const SEQ_STEPS = Array.from({ length: seqStepCount }, (_, i) => i + 1);
 
+  const htmlTemplatesReady = SEQ_STEPS.every(step => {
+    const t = htmlTemplatesDraft[String(step)];
+    return !!(t?.subject?.trim() && t?.html?.trim());
+  });
+
+  const persistHtmlTemplates = async (
+    mode: 'ai' | 'html',
+    templates: Record<string, HtmlStepTemplateDraft>
+  ) => {
+    setSavingHtmlTemplates(true);
+    try {
+      const payload: Record<string, { subject: string; html: string }> = {};
+      for (const [key, value] of Object.entries(templates)) {
+        payload[key] = { subject: value.subject || '', html: value.html || '' };
+      }
+      const res = await fetch(`/api/campaigns/${campaignId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          emailBodyMode: mode,
+          htmlEmailTemplates: payload,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to save HTML templates.');
+        return false;
+      }
+      if (data.campaign) setCampaignData(data.campaign);
+      return true;
+    } catch (e) {
+      console.error(e);
+      alert('Failed to save HTML templates.');
+      return false;
+    } finally {
+      setSavingHtmlTemplates(false);
+    }
+  };
+
+  const handleEmailBodyModeChange = async (mode: 'ai' | 'html') => {
+    setEmailBodyMode(mode);
+    await persistHtmlTemplates(mode, htmlTemplatesDraft);
+  };
+
+  const handleHtmlSubjectChange = (step: number, subject: string) => {
+    setHtmlTemplatesDraft(prev => ({
+      ...prev,
+      [String(step)]: {
+        subject,
+        html: prev[String(step)]?.html || '',
+        fileName: prev[String(step)]?.fileName,
+      },
+    }));
+  };
+
+  const handleHtmlSubjectBlur = async (step: number, subject: string) => {
+    const next = {
+      ...htmlTemplatesDraft,
+      [String(step)]: {
+        subject,
+        html: htmlTemplatesDraft[String(step)]?.html || '',
+        fileName: htmlTemplatesDraft[String(step)]?.fileName,
+      },
+    };
+    setHtmlTemplatesDraft(next);
+    await persistHtmlTemplates(emailBodyMode, next);
+  };
+
+  const handleHtmlFileUpload = async (step: number, file: File | null) => {
+    if (!file) return;
+    if (!/\.html?$/i.test(file.name) && file.type !== 'text/html') {
+      return alert('Please upload an .html file.');
+    }
+    if (file.size > 500_000) {
+      return alert('HTML file must be under 500KB.');
+    }
+    const html = await file.text();
+    if (!html.trim()) return alert('That HTML file is empty.');
+    const next = {
+      ...htmlTemplatesDraft,
+      [String(step)]: {
+        subject: htmlTemplatesDraft[String(step)]?.subject || '',
+        html,
+        fileName: file.name,
+      },
+    };
+    setHtmlTemplatesDraft(next);
+    await persistHtmlTemplates(emailBodyMode === 'ai' ? 'html' : emailBodyMode, next);
+    if (emailBodyMode === 'ai') setEmailBodyMode('html');
+  };
+
+  const handleClearHtmlStep = async (step: number) => {
+    const next = { ...htmlTemplatesDraft };
+    delete next[String(step)];
+    setHtmlTemplatesDraft(next);
+    await persistHtmlTemplates(emailBodyMode, next);
+  };
+
   const fetchBookedMeetings = async () => {
     try {
       const bookedRes = await fetch(`/api/booked-calls?campaignId=${campaignId}`);
@@ -183,7 +297,23 @@ export default function CampaignDetailPage() {
 
       if (campRes.ok) {
         const campData = await campRes.json();
-        setCampaignData(campData.campaign);
+        const campaign = campData.campaign;
+        setCampaignData(campaign);
+        const mode = campaign?.emailBodyMode === 'html' ? 'html' : 'ai';
+        setEmailBodyMode(mode);
+        const raw = campaign?.htmlEmailTemplates && typeof campaign.htmlEmailTemplates === 'object'
+          ? campaign.htmlEmailTemplates
+          : {};
+        const next: Record<string, HtmlStepTemplateDraft> = {};
+        for (const [key, value] of Object.entries(raw as Record<string, any>)) {
+          if (!value || typeof value !== 'object') continue;
+          next[key] = {
+            subject: typeof value.subject === 'string' ? value.subject : '',
+            html: typeof value.html === 'string' ? value.html : '',
+            fileName: typeof value.html === 'string' && value.html.trim() ? `Email ${key}.html` : undefined,
+          };
+        }
+        setHtmlTemplatesDraft(next);
       }
 
       if (repliesRes.ok) {
@@ -240,20 +370,32 @@ export default function CampaignDetailPage() {
   }, [campaignId]);
 
   const handleGenerateLeadSequences = async () => {
+    if (emailBodyMode === 'html' && !htmlTemplatesReady) {
+      return alert(`Upload a subject and HTML file for every email step (1–${seqStepCount}) before generating.`);
+    }
+
     const missing = campaignLeads.filter(cl => {
       const emails = cl.lead.emailSequences || [];
       return SEQ_STEPS.some(s => !emails.find((e: any) => e.sequenceStep === s));
     }).map(cl => cl.leadId);
 
     if (missing.length === 0) {
-      return alert("All leads already have a full email sequence. Use the regenerate icon on a cell to rewrite an individual email.");
+      return alert(
+        emailBodyMode === 'html'
+          ? "All leads already have a full email sequence. Use Re-apply on a cell to refresh from the HTML template."
+          : "All leads already have a full email sequence. Use the regenerate icon on a cell to rewrite an individual email."
+      );
     }
 
     setSeqGenerating(true);
     const batchSize = 5;
     for (let i = 0; i < missing.length; i += batchSize) {
       const batch = missing.slice(i, i + batchSize);
-      setSeqProgress(`Generating email sequences for leads ${i + 1}–${Math.min(i + batchSize, missing.length)} of ${missing.length}...`);
+      setSeqProgress(
+        emailBodyMode === 'html'
+          ? `Applying HTML templates for leads ${i + 1}–${Math.min(i + batchSize, missing.length)} of ${missing.length}...`
+          : `Generating email sequences for leads ${i + 1}–${Math.min(i + batchSize, missing.length)} of ${missing.length}...`
+      );
       try {
         const res = await fetch(`/api/campaigns/${campaignId}/generate-lead-emails`, {
           method: "POST",
@@ -871,17 +1013,24 @@ export default function CampaignDetailPage() {
                  <Users className="text-purple-400" size={20} /> Campaign Leads
                </h3>
                <p className="text-sm text-slate-400">
-                 AI writes a unique {seqStepCount}-step email sequence per lead — Track A for companies actively hiring, Track B nurture for future potential.
+                 {emailBodyMode === 'html'
+                   ? `HTML templates are personalized per lead with merge tags (name, company, etc.) across a ${seqStepCount}-step sequence.`
+                   : `AI writes a unique ${seqStepCount}-step email sequence per lead — Track A for companies actively hiring, Track B nurture for future potential.`}
                </p>
              </div>
              <div className="flex space-x-3 items-center">
                <button
                  onClick={handleGenerateLeadSequences}
-                 disabled={seqGenerating}
+                 disabled={seqGenerating || (emailBodyMode === 'html' && !htmlTemplatesReady)}
+                 title={emailBodyMode === 'html' && !htmlTemplatesReady ? 'Upload subject + HTML for every sequence step first' : undefined}
                  className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors shadow-lg shadow-green-500/25 text-sm font-bold flex items-center gap-2 disabled:opacity-50"
                >
                  {seqGenerating ? <Loader2 className="animate-spin" size={16} /> : <Mail size={16} />}
-                 <span>{seqGenerating ? "Generating..." : "Generate Email Sequences"}</span>
+                 <span>
+                   {seqGenerating
+                     ? (emailBodyMode === 'html' ? 'Applying...' : 'Generating...')
+                     : (emailBodyMode === 'html' ? 'Apply HTML Templates' : 'Generate Email Sequences')}
+                 </span>
                </button>
                <button
                  onClick={() => window.location.href = '/dashboard/leads'}
@@ -890,6 +1039,105 @@ export default function CampaignDetailPage() {
                  Go to Client Lead Database
                </button>
              </div>
+           </div>
+
+           <div className="bg-slate-900/50 p-5 rounded-2xl border border-slate-700/50 space-y-4">
+             <div className="flex flex-wrap items-center justify-between gap-3">
+               <div>
+                 <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                   <FileCode size={16} className="text-purple-400" /> Email body
+                 </h4>
+                 <p className="text-xs text-slate-400 mt-0.5">
+                   Choose AI-written copy or upload your own HTML per sequence step.
+                   {savingHtmlTemplates && <span className="ml-2 text-purple-300">Saving…</span>}
+                 </p>
+               </div>
+               <div className="flex rounded-lg border border-slate-700 overflow-hidden text-xs font-semibold">
+                 <button
+                   type="button"
+                   onClick={() => handleEmailBodyModeChange('ai')}
+                   className={`px-3 py-1.5 transition-colors ${emailBodyMode === 'ai' ? 'bg-purple-600 text-white' : 'bg-slate-950 text-slate-400 hover:text-white'}`}
+                 >
+                   AI-written
+                 </button>
+                 <button
+                   type="button"
+                   onClick={() => handleEmailBodyModeChange('html')}
+                   className={`px-3 py-1.5 transition-colors ${emailBodyMode === 'html' ? 'bg-purple-600 text-white' : 'bg-slate-950 text-slate-400 hover:text-white'}`}
+                 >
+                   HTML template
+                 </button>
+               </div>
+             </div>
+
+             {emailBodyMode === 'html' && (
+               <>
+                 <p className="text-[11px] text-slate-500">
+                   Use merge tags in subject or HTML:{' '}
+                   {HTML_MERGE_TAG_HINTS.map((tag, i) => (
+                     <code key={tag} className="text-purple-300/90">{tag}{i < HTML_MERGE_TAG_HINTS.length - 1 ? ', ' : ''}</code>
+                   ))}
+                 </p>
+                 <div className="space-y-3">
+                   {SEQ_STEPS.map(step => {
+                     const draft = htmlTemplatesDraft[String(step)];
+                     const hasHtml = !!(draft?.html?.trim());
+                     return (
+                       <div key={step} className="grid grid-cols-1 md:grid-cols-[auto_1fr_auto] gap-3 items-start bg-slate-950/60 border border-slate-800 rounded-xl p-3">
+                         <div className="text-xs font-bold text-slate-300 pt-2 w-16">Email {step}</div>
+                         <div className="space-y-2 min-w-0">
+                           <input
+                             type="text"
+                             value={draft?.subject || ''}
+                             onChange={e => handleHtmlSubjectChange(step, e.target.value)}
+                             onBlur={e => handleHtmlSubjectBlur(step, e.target.value)}
+                             placeholder="Subject (supports {{firstName}}, …)"
+                             className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-white text-sm focus:border-purple-500 outline-none"
+                           />
+                           <div className="flex flex-wrap items-center gap-2 text-xs">
+                             <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded cursor-pointer border border-slate-700">
+                               <Upload size={13} />
+                               {hasHtml ? 'Replace HTML' : 'Upload .html'}
+                               <input
+                                 type="file"
+                                 accept=".html,.htm,text/html"
+                                 className="hidden"
+                                 onChange={e => {
+                                   const file = e.target.files?.[0] || null;
+                                   handleHtmlFileUpload(step, file);
+                                   e.target.value = '';
+                                 }}
+                               />
+                             </label>
+                             {hasHtml && (
+                               <>
+                                 <span className="text-green-400 truncate max-w-[200px]" title={draft?.fileName}>
+                                   {draft?.fileName || 'HTML uploaded'}
+                                 </span>
+                                 <button
+                                   type="button"
+                                   onClick={() => handleClearHtmlStep(step)}
+                                   className="text-slate-400 hover:text-red-400"
+                                 >
+                                   Clear
+                                 </button>
+                               </>
+                             )}
+                             {!hasHtml && <span className="text-yellow-500/80">HTML required</span>}
+                             {hasHtml && !draft?.subject?.trim() && <span className="text-yellow-500/80">Subject required</span>}
+                           </div>
+                         </div>
+                       </div>
+                     );
+                   })}
+                 </div>
+                 {!htmlTemplatesReady && (
+                   <p className="text-xs text-yellow-500/90">
+                     Add a subject and HTML file for every step before applying templates to leads.
+                   </p>
+                 )}
+               </>
+             )}
            </div>
 
            {seqGenerating && (
@@ -1029,7 +1277,7 @@ export default function CampaignDetailPage() {
                                      {!isSent && (
                                        <button
                                          onClick={() => handleRegenerateCell(lead, step)}
-                                         title="Regenerate this email"
+                                         title={emailBodyMode === 'html' ? 'Re-apply HTML template for this lead' : 'Regenerate this email'}
                                          className="text-slate-500 hover:text-purple-400 transition-colors shrink-0"
                                        >
                                          <RefreshCw size={13} />
@@ -1090,10 +1338,11 @@ export default function CampaignDetailPage() {
 
       {emailModal && (
         <EmailSequenceModal
-          key={`${emailModal.email.id}-${emailModal.email.updatedAt || ''}`}
+          key={`${emailModal.email.id}-${emailModal.email.updatedAt || emailModal.email.subject || ''}-${emailModal.email.body?.length || 0}`}
           lead={emailModal.lead}
           step={emailModal.step}
           email={emailModal.email}
+          emailBodyMode={emailBodyMode}
           regenerating={regeneratingCells.includes(`${emailModal.lead.id}-${emailModal.step}`)}
           onRegenerate={() => handleRegenerateCell(emailModal.lead, emailModal.step)}
           onApproved={() => fetchCampaignData(true)}
@@ -1611,14 +1860,35 @@ function SendStatusLabel({ email }: { email: any }) {
   return <p className={`text-[10px] font-medium ${cls}`}>{text}</p>;
 }
 
-function EmailSequenceModal({ lead, step, email, regenerating, onRegenerate, onApproved, onClose }: { lead: any, step: number, email: any, regenerating: boolean, onRegenerate: () => void, onApproved: () => void, onClose: () => void }) {
+function EmailSequenceModal({
+  lead,
+  step,
+  email,
+  emailBodyMode = 'ai',
+  regenerating,
+  onRegenerate,
+  onApproved,
+  onClose,
+}: {
+  lead: any;
+  step: number;
+  email: any;
+  emailBodyMode?: 'ai' | 'html';
+  regenerating: boolean;
+  onRegenerate: () => void;
+  onApproved: () => void;
+  onClose: () => void;
+}) {
   const [subject, setSubject] = useState(email.subject || '');
   const [body, setBody] = useState(email.body || '');
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approved, setApproved] = useState(email.approvalStatus === 'Approved');
+  const looksLikeHtml = /<[a-z][\s\S]*>/i.test(body || '');
+  const [bodyTab, setBodyTab] = useState<'preview' | 'source'>(looksLikeHtml ? 'preview' : 'source');
 
   const isHiring = lead.hiringStatus === 'Hiring';
+  const isHtmlMode = emailBodyMode === 'html' || looksLikeHtml;
 
   const handleSave = async () => {
     setSaving(true);
@@ -1652,7 +1922,7 @@ function EmailSequenceModal({ lead, step, email, regenerating, onRegenerate, onA
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+      <div className={`bg-slate-900 border border-slate-700 rounded-2xl w-full ${looksLikeHtml ? 'max-w-3xl' : 'max-w-2xl'} max-h-[90vh] overflow-y-auto shadow-2xl`} onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-start p-6 border-b border-slate-800 sticky top-0 bg-slate-900 z-10">
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -1661,7 +1931,7 @@ function EmailSequenceModal({ lead, step, email, regenerating, onRegenerate, onA
             <p className="text-sm text-slate-400 mt-1">
               {lead.fullName || lead.firstName || 'Unknown contact'} · {lead.companyName || lead.businessName || 'Unknown company'}
             </p>
-            <div className="flex items-center gap-2 mt-2">
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
               <span className={`text-[10px] px-1.5 py-0.5 rounded border ${isHiring ? 'bg-green-500/10 text-green-400 border-green-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'}`}>
                 {isHiring ? 'Track A · Actively Hiring' : 'Track B · Future Potential'}
               </span>
@@ -1697,7 +1967,9 @@ function EmailSequenceModal({ lead, step, email, regenerating, onRegenerate, onA
           {regenerating ? (
             <div className="flex flex-col items-center justify-center py-16 text-purple-400">
               <Loader2 className="animate-spin mb-3" size={28} />
-              <p className="text-sm">Writing a new version of this email...</p>
+              <p className="text-sm">
+                {isHtmlMode ? 'Re-applying HTML template for this lead...' : 'Writing a new version of this email...'}
+              </p>
             </div>
           ) : (
             <>
@@ -1712,14 +1984,50 @@ function EmailSequenceModal({ lead, step, email, regenerating, onRegenerate, onA
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-400">Body</label>
-                <textarea
-                  value={body}
-                  onChange={e => setBody(e.target.value)}
-                  disabled={approved}
-                  rows={12}
-                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white text-sm focus:border-purple-500 outline-none disabled:opacity-60"
-                />
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium text-slate-400">Body</label>
+                  {looksLikeHtml && (
+                    <div className="flex rounded border border-slate-700 overflow-hidden text-[10px] font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setBodyTab('preview')}
+                        className={`px-2 py-1 ${bodyTab === 'preview' ? 'bg-purple-600 text-white' : 'bg-slate-950 text-slate-400'}`}
+                      >
+                        Preview
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBodyTab('source')}
+                        className={`px-2 py-1 ${bodyTab === 'source' ? 'bg-purple-600 text-white' : 'bg-slate-950 text-slate-400'}`}
+                      >
+                        Source
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {looksLikeHtml && bodyTab === 'preview' ? (
+                  <div className="rounded border border-slate-800 bg-white overflow-hidden">
+                    <iframe
+                      title={`Email ${step} preview`}
+                      sandbox=""
+                      srcDoc={body}
+                      className="w-full h-[420px] bg-white"
+                    />
+                  </div>
+                ) : (
+                  <textarea
+                    value={body}
+                    onChange={e => {
+                      setBody(e.target.value);
+                      if (/<[a-z][\s\S]*>/i.test(e.target.value)) {
+                        /* keep current tab */
+                      }
+                    }}
+                    disabled={approved}
+                    rows={looksLikeHtml ? 16 : 12}
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white text-sm focus:border-purple-500 outline-none disabled:opacity-60 font-mono"
+                  />
+                )}
               </div>
 
               <div className="flex items-center justify-between pt-2">
@@ -1728,7 +2036,7 @@ function EmailSequenceModal({ lead, step, email, regenerating, onRegenerate, onA
                   disabled={regenerating || approved || email.status === 'Sent'}
                   className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs rounded transition-colors flex items-center gap-1.5 border border-slate-700 disabled:opacity-50"
                 >
-                  <RefreshCw size={13} /> Regenerate
+                  <RefreshCw size={13} /> {isHtmlMode ? 'Re-apply template' : 'Regenerate'}
                 </button>
                 <div className="flex gap-2">
                   <button onClick={onClose} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs rounded transition-colors border border-slate-700">

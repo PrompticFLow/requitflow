@@ -253,6 +253,8 @@ model Campaign {
   resendFromEmail              String?
   resendWebhookId              String?
   resendWebhookSecretEncrypted String?
+  emailBodyMode                String              @default("ai")
+  htmlEmailTemplates           Json?
   activityLogs                 ActivityLog[]
   bookedCalls                  BookedCall[]
   user                         User                @relation(fields: [userId], references: [id], onDelete: Cascade)

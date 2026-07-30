@@ -88,12 +88,42 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       'knowledgeBaseMode', 'selectedKnowledgeBaseFileIds',
       'personalizationLevel', 'personalizationStyle', 'mentionCompanyName',
       'companyFallback', 'useKnowledgeBase', 'emailLength', 'spamSafety', 'ctaStyle',
-      'autoReplyEnabled', 'autoReplyMode', 'resendFromEmail'
+      'autoReplyEnabled', 'autoReplyMode', 'resendFromEmail',
+      'emailBodyMode', 'htmlEmailTemplates'
     ];
 
     for (const field of editableFields) {
       if (data[field] !== undefined) {
         updateData[field] = data[field];
+      }
+    }
+
+    if (updateData.emailBodyMode !== undefined) {
+      const mode = String(updateData.emailBodyMode).toLowerCase();
+      if (mode !== 'ai' && mode !== 'html') {
+        return NextResponse.json({ error: 'emailBodyMode must be "ai" or "html".' }, { status: 400 });
+      }
+      updateData.emailBodyMode = mode;
+    }
+
+    if (updateData.htmlEmailTemplates !== undefined) {
+      if (updateData.htmlEmailTemplates === null) {
+        updateData.htmlEmailTemplates = null;
+      } else if (typeof updateData.htmlEmailTemplates !== 'object' || Array.isArray(updateData.htmlEmailTemplates)) {
+        return NextResponse.json({ error: 'htmlEmailTemplates must be an object keyed by sequence step.' }, { status: 400 });
+      } else {
+        const cleaned: Record<string, { subject: string; html: string }> = {};
+        for (const [key, value] of Object.entries(updateData.htmlEmailTemplates as Record<string, any>)) {
+          if (!/^\d+$/.test(key)) continue;
+          if (!value || typeof value !== 'object') continue;
+          const subject = typeof value.subject === 'string' ? value.subject : '';
+          const html = typeof value.html === 'string' ? value.html : '';
+          if (Buffer.byteLength(html, 'utf8') > 500_000) {
+            return NextResponse.json({ error: `Email ${key} HTML exceeds the 500KB size limit.` }, { status: 400 });
+          }
+          cleaned[key] = { subject, html };
+        }
+        updateData.htmlEmailTemplates = cleaned;
       }
     }
 
