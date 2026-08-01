@@ -22,17 +22,17 @@ export async function POST(req: Request) {
     const resetUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
 
     const htmlBody = `
-      <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; background: #0f1117; color: #e2e8f0; padding: 32px; border-radius: 12px;">
-        <h2 style="color: #a78bfa; margin-bottom: 8px;">Reset Your Password</h2>
-        <p style="color: #94a3b8; margin-bottom: 24px;">Hi ${user.name || 'there'},</p>
+      <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; background: #141B2D; color: #F8FAFC; padding: 32px; border-radius: 12px;">
+        <h2 style="color: #8298FF; margin-bottom: 8px;">Reset Your Password</h2>
+        <p style="color: #94A3BE; margin-bottom: 24px;">Hi ${user.name || 'there'},</p>
         <p style="margin-bottom: 24px;">Click the button below to reset your FunnelZen AI password. This link expires in <strong>1 hour</strong>.</p>
-        <a href="${resetUrl}" style="display: inline-block; background: linear-gradient(to right, #7c3aed, #2563eb); color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: bold; font-size: 15px;">
+        <a href="${resetUrl}" style="display: inline-block; background: linear-gradient(to right, #5B7CFF, #7C3AED); color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: bold; font-size: 15px;">
           Reset Password
         </a>
-        <p style="color: #64748b; font-size: 12px; margin-top: 32px; word-break: break-all;">
+        <p style="color: #7887A3; font-size: 12px; margin-top: 32px; word-break: break-all;">
           Or copy this link: ${resetUrl}
         </p>
-        <p style="color: #64748b; font-size: 12px; margin-top: 16px;">If you didn't request this, ignore this email. Your password won't change.</p>
+        <p style="color: #7887A3; font-size: 12px; margin-top: 16px;">If you didn't request this, ignore this email. Your password won't change.</p>
       </div>
     `;
 

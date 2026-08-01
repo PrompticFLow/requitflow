@@ -1523,7 +1523,7 @@ export default function AIEmailAgentPage() {
       {/* ── Generate Emails Confirm Modal ── */}
       {generateModalId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-          <div className="bg-slate-900 border-2 border-transparent bg-clip-padding rounded-2xl w-full max-w-3xl p-8 space-y-6 relative overflow-hidden shadow-[0_0_40px_rgba(139,92,246,0.5)]">
+          <div className="bg-slate-900 border-2 border-transparent bg-clip-padding rounded-2xl w-full max-w-3xl p-8 space-y-6 relative overflow-hidden shadow-[0_0_40px_rgba(124,58,237,0.5)]">
             <div className="absolute inset-0 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 p-[2px] -z-10 rounded-2xl" />
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 bg-purple-500/10 rounded-full flex items-center justify-center">

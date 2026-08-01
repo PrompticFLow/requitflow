@@ -7,6 +7,7 @@ export type ByokService =
   | 'apify'
   | 'bayofassets'
   | 'pdl'
+  | 'resend'
   | 'twilio';
 
 const SERVICE_LABELS: Record<ByokService, string> = {
@@ -15,6 +16,7 @@ const SERVICE_LABELS: Record<ByokService, string> = {
   apify: 'Apify',
   bayofassets: 'Bay of Assets',
   pdl: 'People Data Labs',
+  resend: 'Resend',
   twilio: 'Twilio',
 };
 
@@ -24,6 +26,7 @@ const ENV_KEYS: Record<Exclude<ByokService, 'twilio'>, string> = {
   apify: 'APIFY_API_TOKEN',
   bayofassets: 'BAYOFASSETS_API_KEY',
   pdl: 'PDL_API_KEY',
+  resend: 'RESEND_API_KEY',
 };
 
 export class ByokKeyMissingError extends Error {
@@ -94,6 +97,9 @@ export async function resolveUserApiKey(
       case 'pdl':
         encrypted = settings?.pdlKeyEncrypted;
         break;
+      case 'resend':
+        encrypted = settings?.resendKeyEncrypted;
+        break;
     }
     const key = safeDecrypt(encrypted);
     if (!key) throw new ByokKeyMissingError(service, missingMessage(service));
@@ -142,6 +148,7 @@ export async function getByokConfiguredFlags(userId: string): Promise<Record<Byo
       apify: !!process.env.APIFY_API_TOKEN?.trim(),
       bayofassets: !!process.env.BAYOFASSETS_API_KEY?.trim(),
       pdl: !!process.env.PDL_API_KEY?.trim(),
+      resend: !!process.env.RESEND_API_KEY?.trim(),
       twilio: !!(
         process.env.TWILIO_ACCOUNT_SID?.trim() &&
         process.env.TWILIO_AUTH_TOKEN?.trim() &&
@@ -157,6 +164,7 @@ export async function getByokConfiguredFlags(userId: string): Promise<Record<Byo
     apify: !!safeDecrypt(settings?.apifyTokenEncrypted),
     bayofassets: !!safeDecrypt(settings?.bayOfAssetsKeyEncrypted),
     pdl: !!safeDecrypt(settings?.pdlKeyEncrypted),
+    resend: !!safeDecrypt(settings?.resendKeyEncrypted),
     twilio: !!(
       safeDecrypt(settings?.twilioSidEncrypted) &&
       safeDecrypt(settings?.twilioAuthTokenEncrypted) &&

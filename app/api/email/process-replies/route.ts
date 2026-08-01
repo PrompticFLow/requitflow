@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import nodemailer from 'nodemailer';
 import sgMail from '@sendgrid/mail';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
-import { sendViaResend, getCampaignResendSender } from '@/lib/resend';
+import { sendViaResend, resolveCampaignResendSender } from '@/lib/resend';
 import { buildReplySubject } from '@/lib/email/reply-subject';
 
 export const maxDuration = 300;
@@ -63,7 +63,7 @@ export async function GET(req: Request) {
           throw new Error('Lead is unsubscribed');
         }
 
-        const resendSender = getCampaignResendSender(campaign as any);
+        const resendSender = await resolveCampaignResendSender(user.id, campaign as any);
 
         const smtp = await prisma.smtpAccount.findUnique({ where: { userId: user.id } });
         const fromEmail = smtp?.fromEmail || campaign.senderEmail || user.email;

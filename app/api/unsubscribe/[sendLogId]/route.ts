@@ -7,10 +7,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ sendLogI
 
   const page = (message: string) => new Response(
     `<!DOCTYPE html><html><head><title>Unsubscribe</title><meta name="viewport" content="width=device-width, initial-scale=1" /></head>
-<body style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#0f172a; color:#e2e8f0; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0;">
+<body style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#0B1020; color:#F8FAFC; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0;">
 <div style="text-align:center; padding:40px; max-width:420px;">
 <h2 style="margin-bottom:12px;">${message}</h2>
-<p style="color:#94a3b8; font-size:14px;">You will not receive any further emails from this sender.</p>
+<p style="color:#94A3BE; font-size:14px;">You will not receive any further emails from this sender.</p>
 </div></body></html>`,
     { headers: { 'Content-Type': 'text/html' } }
   );

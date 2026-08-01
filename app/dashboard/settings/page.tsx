@@ -20,6 +20,7 @@ export default function SettingsPage() {
     bayOfAssetsKeyEncrypted: '',
     bayOfAssetsModel: '',
     pdlKeyEncrypted: '',
+    resendKeyEncrypted: '',
     twilioSidEncrypted: '',
     twilioAuthTokenEncrypted: '',
     twilioPhone: '',
@@ -83,6 +84,7 @@ export default function SettingsPage() {
             bayOfAssetsKeyEncrypted: data.settings.bayOfAssetsKeyEncrypted === '********' ? '' : (data.settings.bayOfAssetsKeyEncrypted || ''),
             bayOfAssetsModel: data.settings.bayOfAssetsModel || '',
             pdlKeyEncrypted: data.settings.pdlKeyEncrypted === '********' ? '' : (data.settings.pdlKeyEncrypted || ''),
+            resendKeyEncrypted: data.settings.resendKeyEncrypted === '********' ? '' : (data.settings.resendKeyEncrypted || ''),
             twilioSidEncrypted: data.settings.twilioSidEncrypted === '********' ? '' : (data.settings.twilioSidEncrypted || ''),
             twilioAuthTokenEncrypted: data.settings.twilioAuthTokenEncrypted === '********' ? '' : (data.settings.twilioAuthTokenEncrypted || ''),
             twilioPhone: data.settings.twilioPhone || '',
@@ -206,6 +208,7 @@ export default function SettingsPage() {
         'apifyTokenEncrypted',
         'bayOfAssetsKeyEncrypted',
         'pdlKeyEncrypted',
+        'resendKeyEncrypted',
         'twilioSidEncrypted',
         'twilioAuthTokenEncrypted',
       ] as const;
@@ -227,7 +230,16 @@ export default function SettingsPage() {
         body: JSON.stringify(payload),
       });
       if (res.ok) {
-        alert("API keys saved successfully.");
+        const saved = await res.json().catch(() => ({}));
+        if (saved.replyTracking === 'active') {
+          alert("API keys saved. Reply & bounce tracking was set up automatically in your Resend account.");
+        } else if (saved.replyTracking === 'skipped-localhost') {
+          alert("API keys saved. Note: Resend reply tracking needs a public app URL — set NEXT_PUBLIC_APP_URL to your ngrok/deployed URL and re-save the key so the webhook can be created.");
+        } else if (saved.replyTracking === 'failed') {
+          alert("API keys saved, but Resend reply tracking could not be set up automatically. Add a webhook in Resend (events: email.received, email.bounced) pointing to /api/webhooks/resend.");
+        } else {
+          alert("API keys saved successfully.");
+        }
         setApiKeysData(prev => ({
           ...prev,
           openRouterKeyEncrypted: '',
@@ -235,6 +247,7 @@ export default function SettingsPage() {
           apifyTokenEncrypted: '',
           bayOfAssetsKeyEncrypted: '',
           pdlKeyEncrypted: '',
+          resendKeyEncrypted: '',
           twilioSidEncrypted: '',
           twilioAuthTokenEncrypted: '',
         }));
@@ -505,6 +518,30 @@ export default function SettingsPage() {
                   placeholder={apiKeysConfigured.pdl ? "Saved key hidden. Enter a new key only to replace it." : ""}
                   autoComplete="off"
                 />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
+                  Resend API Key
+                  {apiKeysConfigured.resend && (
+                    <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded border border-green-500/30">Saved</span>
+                  )}
+                </label>
+                <input
+                  type="password"
+                  value={apiKeysData.resendKeyEncrypted}
+                  onChange={e => setApiKeysData({ ...apiKeysData, resendKeyEncrypted: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
+                  placeholder={apiKeysConfigured.resend ? "Saved key hidden. Enter a new key only to replace it." : "re_..."}
+                  autoComplete="off"
+                />
+                <p className="text-xs text-slate-500">
+                  Used to send every campaign's emails and to capture replies. Create one in the{' '}
+                  <a href="https://resend.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">Resend dashboard</a>,
+                  and verify your sending domain on the{' '}
+                  <a href="https://resend.com/domains" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">Domains page</a> (including the receiving MX record so replies arrive).
+                  Each campaign then only picks which verified address it sends from.
+                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

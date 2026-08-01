@@ -37,7 +37,6 @@ export default function CampaignDetailPage() {
   const [applyingCalendlyLink, setApplyingCalendlyLink] = useState(false);
 
   // Resend Sending Account State (one API key + sender email per campaign)
-  const [resendKeyInput, setResendKeyInput] = useState("");
   const [resendFromInput, setResendFromInput] = useState("");
   const [resendEditing, setResendEditing] = useState(false);
   const [resendBusy, setResendBusy] = useState(false);
@@ -474,32 +473,31 @@ export default function CampaignDetailPage() {
   };
 
   const handleSaveResend = async () => {
-    const apiKey = resendKeyInput.trim();
     const fromEmail = resendFromInput.trim();
     if (!fromEmail) return alert("Enter the email address you want to send from.");
-    if (!campaignData?.resendConfigured && !apiKey) return alert("Enter your Resend API key (starts with re_).");
 
     setResendBusy(true);
     try {
-      const payload: any = { resendFromEmail: fromEmail };
-      if (apiKey) payload.resendApiKey = apiKey; // only replace the key when a new one was typed
       const res = await fetch(`/api/campaigns/${campaignId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ resendFromEmail: fromEmail })
       });
       if (res.ok) {
         const data = await res.json();
-        setResendKeyInput("");
         setResendFromInput("");
         setResendEditing(false);
         await fetchCampaignData(true);
-        if (data.webhookAutoSetup === 'created') {
-          alert("Sending account saved. Reply & bounce tracking was set up automatically in your Resend account.");
-        } else if (data.webhookAutoSetup === 'skipped-localhost') {
-          alert("Sending account saved. Note: reply tracking needs a public app URL — set NEXT_PUBLIC_APP_URL to your ngrok/deployed URL, restart, and re-save the API key so the webhook can be created.");
-        } else if (data.webhookAutoSetup === 'failed') {
-          alert("Sending account saved, but reply tracking could not be set up in Resend automatically. Add a webhook manually in Resend (events: email.received, email.bounced) pointing to /api/webhooks/resend.");
+        if (data.replyTracking === 'no-key') {
+          alert(
+            campaignData?.isByok
+              ? "Sender saved, but no Resend API key is configured yet. Add it in Settings → API Keys before starting this campaign."
+              : "Sender saved, but RESEND_API_KEY is not set on the server. Add it to your environment before starting this campaign."
+          );
+        } else if (data.replyTracking === 'skipped-localhost') {
+          alert("Sender saved. Note: reply tracking needs a public app URL — set NEXT_PUBLIC_APP_URL to your ngrok/deployed URL and re-save so the webhook can be created.");
+        } else if (data.replyTracking === 'failed') {
+          alert("Sender saved, but reply tracking could not be set up in Resend automatically. Add a webhook manually in Resend (events: email.received, email.bounced) pointing to /api/webhooks/resend.");
         }
       } else {
         const data = await res.json();
@@ -510,13 +508,13 @@ export default function CampaignDetailPage() {
   };
 
   const handleDisconnectResend = async () => {
-    if (!confirm("Remove the Resend API key and sender email from this campaign? Sending will stop until you add them again.")) return;
+    if (!confirm("Remove the sender email from this campaign? Sending will stop until you add it again.")) return;
     setResendBusy(true);
     try {
       const res = await fetch(`/api/campaigns/${campaignId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resendApiKey: null, resendFromEmail: null })
+        body: JSON.stringify({ resendFromEmail: null })
       });
       if (res.ok) await fetchCampaignData(true);
       else {
@@ -839,28 +837,48 @@ export default function CampaignDetailPage() {
                  <Mail size={18} className="text-purple-400" /> Sending Account (Resend)
                </h4>
                <p className="text-xs text-slate-400 mb-2">
-                 Emails for this campaign are sent through <a href="https://resend.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">Resend</a> using your own API key — one key per campaign, with daily limits, open/click tracking, and unsubscribe handling built in. The sender address must be on a domain verified in your Resend account.
+                 Emails for this campaign are sent through <a href="https://resend.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">Resend</a>, with daily limits, open/click tracking, and unsubscribe handling built in. This campaign only picks the address it sends from — the sender must be on a domain verified in the Resend account.
                </p>
-               <p className="text-xs text-slate-500 mb-4">
-                 <strong className="text-slate-400">Replies are captured automatically:</strong> when you save your API key, we set up reply &amp; bounce tracking (a webhook) in your Resend account for you. Just make sure your domain's DNS records from the Resend <a href="https://resend.com/domains" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">Domains page</a> are added — including the receiving MX record. Replies then appear in the Replies tab within seconds and stop that lead's follow-ups.
+               <p className="text-xs text-slate-500 mb-3">
+                 <strong className="text-slate-400">The Resend API key is not set per campaign.</strong>{' '}
+                 {campaignData?.isByok ? (
+                   <>It lives in <Link href="/dashboard/settings#api-keys" className="text-purple-400 hover:underline">Settings → API Keys</Link>, alongside your other keys, and applies to every campaign.</>
+                 ) : (
+                   <>It is read from the <code className="text-slate-300">RESEND_API_KEY</code> environment variable on the server and applies to every campaign.</>
+                 )}
                </p>
 
-               {campaignData?.resendConfigured && campaignData?.resendFromEmail && !resendEditing ? (
+               {!campaignData?.resendKeyConfigured && (
+                 <div className="mb-4 text-xs text-amber-400/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                   No Resend API key is configured yet.{' '}
+                   {campaignData?.isByok ? (
+                     <>Add it in <Link href="/dashboard/settings#api-keys" className="underline hover:text-amber-300">Settings → API Keys</Link> — get one from the <a href="https://resend.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline hover:text-amber-300">Resend dashboard</a>.</>
+                   ) : (
+                     <>Set <code>RESEND_API_KEY</code> in the server environment (.env) and restart the app.</>
+                   )}
+                 </div>
+               )}
+
+               <p className="text-xs text-slate-500 mb-4">
+                 <strong className="text-slate-400">Replies are captured automatically:</strong> reply &amp; bounce tracking (a webhook) is set up in the Resend account for you. Just make sure the domain's DNS records from the Resend <a href="https://resend.com/domains" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">Domains page</a> are added — including the receiving MX record. Replies then appear in the Replies tab within seconds and stop that lead's follow-ups.
+               </p>
+
+               {campaignData?.resendFromEmail && !resendEditing ? (
                  <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-lg p-4">
                    <div>
                      <p className="text-white text-sm font-medium flex items-center gap-2">
                        {campaignData.resendFromEmail}
-                       <span className="text-[10px] px-1.5 py-0.5 rounded border bg-green-500/10 text-green-400 border-green-500/30">
-                         Connected
+                       <span className={`text-[10px] px-1.5 py-0.5 rounded border ${campaignData.resendKeyConfigured ? 'bg-green-500/10 text-green-400 border-green-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'}`}>
+                         {campaignData.resendKeyConfigured ? 'Connected' : 'API key missing'}
                        </span>
                      </p>
                      <p className="text-xs text-slate-500 mt-1">
-                       Resend API key: ••••••••{campaignData.dailyLimit ? ` · Daily limit: ${campaignData.dailyLimit} emails/day` : ' · Daily limit: 50 emails/day'}
-                       {campaignData.resendWebhookId ? ' · Reply tracking: active' : ''}
+                       {campaignData.dailyLimit ? `Daily limit: ${campaignData.dailyLimit} emails/day` : 'Daily limit: 50 emails/day'}
+                       {campaignData.resendReplyTracking ? ' · Reply tracking: active' : ''}
                      </p>
-                     {!campaignData.resendWebhookId && (
+                     {!campaignData.resendReplyTracking && (
                        <p className="text-xs text-amber-400/90 mt-1">
-                         Reply tracking is not set up yet — click Edit and re-save your API key (the app URL must be public, e.g. your ngrok or deployed domain).
+                         Reply tracking is not set up yet — re-save the sender once the app URL is public (your ngrok or deployed domain), or set RESEND_WEBHOOK_SECRET after adding the webhook in Resend manually.
                        </p>
                      )}
                    </div>
@@ -868,7 +886,6 @@ export default function CampaignDetailPage() {
                      <button
                        onClick={() => {
                          setResendFromInput(campaignData.resendFromEmail || "");
-                         setResendKeyInput("");
                          setResendEditing(true);
                        }}
                        disabled={resendBusy}
@@ -887,27 +904,18 @@ export default function CampaignDetailPage() {
                  </div>
                ) : (
                  <div className="space-y-3">
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                     <div>
-                       <label className="block text-xs text-slate-400 mb-1.5">Resend API key {campaignData?.resendConfigured ? '(leave blank to keep current key)' : ''}</label>
-                       <input
-                         type="password"
-                         value={resendKeyInput}
-                         onChange={e => setResendKeyInput(e.target.value)}
-                         placeholder="re_..."
-                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-purple-500 outline-none"
-                       />
-                     </div>
-                     <div>
-                       <label className="block text-xs text-slate-400 mb-1.5">Send emails from</label>
-                       <input
-                         type="email"
-                         value={resendFromInput}
-                         onChange={e => setResendFromInput(e.target.value)}
-                         placeholder="you@yourdomain.com"
-                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-purple-500 outline-none"
-                       />
-                     </div>
+                   <div className="max-w-md">
+                     <label className="block text-xs text-slate-400 mb-1.5">Send emails from</label>
+                     <input
+                       type="email"
+                       value={resendFromInput}
+                       onChange={e => setResendFromInput(e.target.value)}
+                       placeholder="you@yourdomain.com"
+                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:border-purple-500 outline-none"
+                     />
+                     <p className="text-xs text-slate-500 mt-1.5">
+                       Must be on a domain verified in the Resend account — check the <a href="https://resend.com/domains" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">Domains page</a>.
+                     </p>
                    </div>
                    <div className="flex items-center gap-3">
                      <button
@@ -916,25 +924,17 @@ export default function CampaignDetailPage() {
                        className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors text-sm font-bold flex items-center gap-2 disabled:opacity-50"
                      >
                        {resendBusy ? <Loader2 className="animate-spin" size={15} /> : <Mail size={15} />}
-                       {resendBusy ? "Saving..." : "Save Sending Account"}
+                       {resendBusy ? "Saving..." : "Save Sender"}
                      </button>
                      {resendEditing && (
                        <button
-                         onClick={() => { setResendEditing(false); setResendKeyInput(""); setResendFromInput(""); }}
+                         onClick={() => { setResendEditing(false); setResendFromInput(""); }}
                          disabled={resendBusy}
                          className="text-xs text-slate-400 hover:text-white transition-colors"
                        >
                          Cancel
                        </button>
                      )}
-                     <a
-                       href="https://resend.com/api-keys"
-                       target="_blank"
-                       rel="noopener noreferrer"
-                       className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
-                     >
-                       Get an API key from the Resend dashboard →
-                     </a>
                    </div>
                  </div>
                )}
@@ -957,8 +957,8 @@ export default function CampaignDetailPage() {
                </h4>
                <ul className="space-y-2 text-sm text-slate-300">
                  <li className="flex items-center gap-2">
-                   {campaignData?.resendConfigured && campaignData?.resendFromEmail ? <Check size={16} className="text-green-500" /> : <X size={16} className="text-red-500" />}
-                   Add a Resend API key &amp; sender email
+                   {campaignData?.resendConfigured ? <Check size={16} className="text-green-500" /> : <X size={16} className="text-red-500" />}
+                   Resend API key configured &amp; sender email set
                  </li>
                  <li className="flex items-center gap-2">
                    {campaignLeads.length > 0 ? <Check size={16} className="text-green-500" /> : <X size={16} className="text-red-500" />}

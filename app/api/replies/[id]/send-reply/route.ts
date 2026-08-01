@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 import nodemailer from 'nodemailer';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
 import sgMail from '@sendgrid/mail';
-import { sendViaResend, getCampaignResendSender } from '@/lib/resend';
+import { sendViaResend, resolveCampaignResendSender } from '@/lib/resend';
 import { buildReplySubject } from '@/lib/email/reply-subject';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -33,8 +33,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: 'Reply, Lead, or Campaign not found.' }, { status: 404 });
     }
 
-    // Check sending methods: campaign Resend key first, then SMTP, then SendGrid
-    const resendSender = getCampaignResendSender(reply.campaign as any);
+    // Check sending methods: Resend first, then SMTP, then SendGrid
+    const resendSender = await resolveCampaignResendSender(user.id, reply.campaign as any);
 
     const smtpAccount = await prisma.smtpAccount.findUnique({
       where: { userId: user.id }
@@ -46,7 +46,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const hasSendGrid = !!(sendgridApiKey && sendgridFromEmail);
 
     if (!resendSender && !hasVerifiedSmtp && !hasSendGrid) {
-      return NextResponse.json({ error: 'Add a Resend API key and sender email to this campaign (or configure SMTP/SendGrid) to send replies.' }, { status: 400 });
+      return NextResponse.json({ error: 'Configure a Resend API key and set this campaign\'s sender email (or configure SMTP/SendGrid) to send replies.' }, { status: 400 });
     }
 
     const to = reply.lead.email;

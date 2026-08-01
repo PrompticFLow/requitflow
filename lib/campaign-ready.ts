@@ -1,4 +1,6 @@
 import { prisma } from './prisma';
+import { resolveResendApiKey } from './resend';
+import { isByokEnabled } from './byok';
 
 export interface ReadinessItem {
   key: string;
@@ -50,21 +52,30 @@ export async function checkCampaignReadyToStart(
   const smtpAccount = await prisma.smtpAccount.findUnique({ where: { userId } });
   const hasVerifiedSmtp = smtpAccount && smtpAccount.isVerified && smtpAccount.status === 'Active';
 
-  const hasCampaignResend = !!(
-    (campaign as any).resendApiKeyEncrypted && (campaign as any).resendFromEmail
-  );
+  // The Resend API key is account-level (env / Settings); the campaign only
+  // supplies the verified sender address.
+  const resendKey = await resolveResendApiKey(userId);
+  const hasCampaignResend = !!(resendKey && campaign.resendFromEmail);
 
   const senderOk = hasCampaignResend || hasVerifiedSmtp || (hasSendGridKey && hasSendGridEmail);
+
+  const keyHint = isByokEnabled()
+    ? 'Add your Resend API key in Settings → API Keys'
+    : 'Set RESEND_API_KEY in the server environment';
 
   items.push({
     key: 'senderEmail',
     label: 'Sender email configured',
     passed: senderOk,
-    actionHint: 'Add your Resend API key and sender email to this campaign (or configure SMTP/SendGrid) before starting.'
+    actionHint: `${keyHint} and set this campaign's sender email (or configure SMTP/SendGrid) before starting.`
   });
 
   if (!senderOk) {
-    missingRequirements.push('Add a Resend API key and sender email before starting.');
+    missingRequirements.push(
+      resendKey
+        ? 'Set the sender email for this campaign before starting.'
+        : `${keyHint} and set this campaign's sender email before starting.`
+    );
   }
 
   // 2. Booking link (optional — emails fall back to a reply-based CTA without one)

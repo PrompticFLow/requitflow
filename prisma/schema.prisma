@@ -52,6 +52,9 @@ model UserSettings {
   openRouterKeyEncrypted   String?
   neverBounceKeyEncrypted  String?
   pdlKeyEncrypted          String?
+  resendKeyEncrypted       String?
+  resendWebhookId          String?
+  resendWebhookSecretEncrypted String?
   twilioSidEncrypted       String?
   twilioAuthTokenEncrypted String?
   twilioPhone              String?
@@ -249,10 +252,10 @@ model Campaign {
   proof                        String?
   targetLocation               String?
   trustReason                  String?
-  resendApiKeyEncrypted        String?
+  // The Resend API key is NOT per campaign — it lives in RESEND_API_KEY
+  // (IS_BYOK=false) or in UserSettings.resendKeyEncrypted (IS_BYOK=true).
+  // A campaign only picks the verified sender address it sends from.
   resendFromEmail              String?
-  resendWebhookId              String?
-  resendWebhookSecretEncrypted String?
   emailBodyMode                String              @default("ai")
   htmlEmailTemplates           Json?
   activityLogs                 ActivityLog[]

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { encrypt } from '@/lib/encryption';
 import { getByokConfiguredFlags, isByokEnabled } from '@/lib/byok';
+import { ensureResendReplyTracking, validateResendApiKey } from '@/lib/resend';
 
 const MASK = '********';
 
@@ -40,6 +41,8 @@ export async function GET() {
       openRouterKeyEncrypted: settings.openRouterKeyEncrypted ? MASK : null,
       neverBounceKeyEncrypted: settings.neverBounceKeyEncrypted ? MASK : null,
       pdlKeyEncrypted: settings.pdlKeyEncrypted ? MASK : null,
+      resendKeyEncrypted: settings.resendKeyEncrypted ? MASK : null,
+      resendWebhookSecretEncrypted: settings.resendWebhookSecretEncrypted ? MASK : null,
       twilioSidEncrypted: settings.twilioSidEncrypted ? MASK : null,
       twilioAuthTokenEncrypted: settings.twilioAuthTokenEncrypted ? MASK : null,
       smtpPassEncrypted: settings.smtpPassEncrypted ? MASK : null,
@@ -61,6 +64,7 @@ export async function POST(req: Request) {
     'openRouterKeyEncrypted',
     'neverBounceKeyEncrypted',
     'pdlKeyEncrypted',
+    'resendKeyEncrypted',
     'twilioSidEncrypted',
     'twilioAuthTokenEncrypted',
     'smtpPassEncrypted',
@@ -70,6 +74,25 @@ export async function POST(req: Request) {
     const encrypted = encryptIfPlain(data[field]);
     if (encrypted) updateData[field] = encrypted;
     else delete updateData[field];
+  }
+
+  const resendKeyChanged = updateData.resendKeyEncrypted !== undefined;
+  if (resendKeyChanged) {
+    const key = String(data.resendKeyEncrypted).trim();
+    if (!key.startsWith('re_')) {
+      return NextResponse.json(
+        { error: 'That does not look like a Resend API key (it should start with "re_").' },
+        { status: 400 }
+      );
+    }
+    const validation = await validateResendApiKey(key);
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
+    }
+    // A new key may belong to a different Resend account — drop the webhook
+    // we remembered so it is re-created (and re-verified) below.
+    updateData.resendWebhookId = null;
+    updateData.resendWebhookSecretEncrypted = null;
   }
 
   // Strip response-only fields if clients echo them back
@@ -86,5 +109,17 @@ export async function POST(req: Request) {
     create: { userId: user.id, ...updateData }
   });
 
-  return NextResponse.json({ success: true });
+  // Saving a Resend key auto-creates the reply/bounce webhook in that Resend
+  // account. Best-effort — never blocks saving the key.
+  let replyTracking: string | undefined;
+  if (resendKeyChanged) {
+    try {
+      replyTracking = await ensureResendReplyTracking(user.id);
+    } catch (err: any) {
+      console.error('Resend reply tracking setup failed:', err?.message);
+      replyTracking = 'failed';
+    }
+  }
+
+  return NextResponse.json({ success: true, ...(replyTracking ? { replyTracking } : {}) });
 }

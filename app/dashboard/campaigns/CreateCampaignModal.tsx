@@ -138,7 +138,7 @@ export default function CreateCampaignModal({
             type="submit"
             form="campaign-form"
             disabled={loading}
-            className="px-8 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 disabled:opacity-50 text-white rounded-lg font-bold transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)] flex items-center space-x-2"
+            className="px-8 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 disabled:opacity-50 text-white rounded-lg font-bold transition-all shadow-[0_0_20px_rgba(34,197,94,0.3)] flex items-center space-x-2"
           >
             {loading ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
             <span>{editingId ? "Save Changes" : "Create Campaign"}</span>

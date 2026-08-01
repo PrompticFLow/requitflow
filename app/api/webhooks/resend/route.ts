@@ -2,21 +2,22 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { prisma } from '@/lib/prisma';
 import { decrypt } from '@/lib/encryption';
-import { getReceivedEmail } from '@/lib/resend';
+import { getReceivedEmail, resolveResendApiKey } from '@/lib/resend';
 import { handleInboundReply } from '@/lib/reply-handler';
 
 export const maxDuration = 60;
 
 // Resend webhook receiver — reply capture with zero per-customer setup.
 //
-// When a campaign's Resend API key is saved, the app automatically creates a
-// webhook in that customer's Resend account pointing here (see the campaign
-// PATCH route). The customer only needs their domain's DNS records from the
-// Resend Domains page (SPF/DKIM to send + the receiving MX record) — no IMAP,
-// no app passwords.
+// The webhook is created automatically in the Resend account behind
+// RESEND_API_KEY (or the user's Settings key when IS_BYOK=true) — see
+// ensureResendReplyTracking. Its signing secret is either RESEND_WEBHOOK_SECRET
+// or the one we stored on the user's settings row at creation time. The
+// customer only needs their domain's DNS records from the Resend Domains page
+// (SPF/DKIM to send + the receiving MX record) — no IMAP, no app passwords.
 //
 // email.received payloads carry metadata only; the full body is fetched from
-// GET /emails/receiving/{id} using the matching campaign's own API key.
+// GET /emails/receiving/{id} using the owning user's Resend API key.
 
 function verifySvixSignature(payload: string, headers: Headers, secret: string): boolean {
   try {
@@ -48,16 +49,16 @@ async function isSignatureValid(rawBody: string, headers: Headers): Promise<bool
   const globalSecret = process.env.RESEND_WEBHOOK_SECRET;
   if (globalSecret && verifySvixSignature(rawBody, headers, globalSecret)) return true;
 
-  // Per-campaign secrets (auto-created webhooks in each customer's account)
-  const campaigns = await prisma.campaign.findMany({
+  // Per-account secrets (auto-created webhooks, one per Resend account)
+  const settings = await prisma.userSettings.findMany({
     where: { resendWebhookSecretEncrypted: { not: null } },
     select: { resendWebhookSecretEncrypted: true }
   });
   const secrets = new Set<string>();
-  for (const c of campaigns) {
+  for (const s of settings) {
     try {
-      const s = decrypt(c.resendWebhookSecretEncrypted!);
-      if (s) secrets.add(s);
+      const decrypted = decrypt(s.resendWebhookSecretEncrypted!);
+      if (decrypted) secrets.add(decrypted);
     } catch { /* ignore undecryptable secrets */ }
   }
   for (const s of Array.from(secrets)) {
@@ -102,7 +103,6 @@ async function findCampaignForRecipients(toAddresses: string[]) {
   if (toAddresses.length === 0) return null;
   return prisma.campaign.findFirst({
     where: {
-      resendApiKeyEncrypted: { not: null },
       resendFromEmail: { in: toAddresses.map(a => a.toLowerCase()) }
     },
     orderBy: { updatedAt: 'desc' }
@@ -156,12 +156,12 @@ export async function POST(req: Request) {
       const campaign = await findCampaignForRecipients(toAddresses);
 
       // The webhook payload is metadata-only — fetch the full email (body +
-      // headers) from Resend using the matching campaign's own API key.
+      // headers) from Resend using the owning user's Resend API key.
       const receivedEmailId = d.email_id || d.id;
       if (campaign && receivedEmailId && !d.text && !d.html) {
         try {
-          const apiKey = decrypt(campaign.resendApiKeyEncrypted!);
-          const full = await getReceivedEmail(apiKey, receivedEmailId);
+          const apiKey = await resolveResendApiKey(campaign.userId);
+          const full = apiKey ? await getReceivedEmail(apiKey, receivedEmailId) : null;
           if (full) d = { ...d, ...full };
         } catch (err: any) {
           console.error('Failed to fetch received email content:', err?.message);

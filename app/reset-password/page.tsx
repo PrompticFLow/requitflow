@@ -102,7 +102,7 @@ function ResetPasswordForm() {
 
 export default function ResetPasswordPage() {
   return (
-    <div className="flex h-screen items-center justify-center bg-[#070A12] relative overflow-hidden text-slate-200">
+    <div className="flex h-screen items-center justify-center bg-[#0B1020] relative overflow-hidden text-slate-200">
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-blue-600/20 rounded-full blur-[100px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[400px] h-[400px] bg-purple-600/20 rounded-full blur-[100px] pointer-events-none" />
 

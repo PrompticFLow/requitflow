@@ -81,11 +81,11 @@ export default function AuthPage() {
   };
 
   if (!mounted) {
-    return <div className="flex h-screen items-center justify-center bg-[#070A12] relative overflow-hidden text-slate-200" />;
+    return <div className="flex h-screen items-center justify-center bg-[#0B1020] relative overflow-hidden text-slate-200" />;
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-[#070A12] relative overflow-hidden text-slate-200">
+    <div className="flex h-screen items-center justify-center bg-[#0B1020] relative overflow-hidden text-slate-200">
       {/* Background Orbs */}
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-blue-600/20 rounded-full blur-[100px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[400px] h-[400px] bg-purple-600/20 rounded-full blur-[100px] pointer-events-none" />
@@ -191,7 +191,7 @@ export default function AuthPage() {
           <button 
             type="submit" 
             disabled={loading}
-            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white py-3.5 rounded-xl font-bold transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] flex items-center justify-center space-x-2 disabled:opacity-70 mt-6"
+            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white py-3.5 rounded-xl font-bold transition-all shadow-[0_0_20px_rgba(91,124,255,0.3)] flex items-center justify-center space-x-2 disabled:opacity-70 mt-6"
           >
             {loading ? (
               <span className="animate-pulse">Processing...</span>

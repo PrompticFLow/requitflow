@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
-import { encrypt } from '@/lib/encryption';
-import { validateResendApiKey, ensureResendWebhook } from '@/lib/resend';
+import { ensureResendReplyTracking, getResendReplyTrackingStatus } from '@/lib/resend';
+import { getByokConfiguredFlags, isByokEnabled } from '@/lib/byok';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -43,13 +43,20 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       prisma.emailSequence.count({ where: { campaignId: id, sequenceStep: 1, approvalStatus: 'Approved' } }),
     ]);
 
-    // Never expose the encrypted Resend API key — only whether one is set
-    const { resendApiKeyEncrypted, resendWebhookSecretEncrypted, ...safeCampaign } = campaign as any;
+    // The Resend API key is account-level (env or Settings) — report only
+    // whether it is configured, never the key itself.
+    const [{ resend: resendKeyConfigured }, replyTrackingActive] = await Promise.all([
+      getByokConfiguredFlags(user.id),
+      getResendReplyTrackingStatus(user.id),
+    ]);
 
     return NextResponse.json({
       campaign: {
-        ...safeCampaign,
-        resendConfigured: !!resendApiKeyEncrypted,
+        ...campaign,
+        isByok: isByokEnabled(),
+        resendKeyConfigured,
+        resendReplyTracking: replyTrackingActive,
+        resendConfigured: resendKeyConfigured && !!campaign.resendFromEmail,
         totalDrafts,
         pendingReview,
         approvedEmail1
@@ -127,46 +134,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       }
     }
 
-    // Resend API key: stored encrypted, one key per campaign.
-    // Pass a plain key to set/replace it, or null to disconnect the sender.
-    let webhookAutoSetup: 'created' | 'skipped-localhost' | 'failed' | null = null;
-    if (data.resendApiKey !== undefined) {
-      if (data.resendApiKey === null || data.resendApiKey === '') {
-        updateData.resendApiKeyEncrypted = null;
-        updateData.resendWebhookId = null;
-        updateData.resendWebhookSecretEncrypted = null;
-      } else {
-        const apiKey = String(data.resendApiKey).trim();
-        if (!apiKey.startsWith('re_')) {
-          return NextResponse.json({ error: 'That does not look like a Resend API key (it should start with "re_").' }, { status: 400 });
-        }
-        const validation = await validateResendApiKey(apiKey);
-        if (!validation.valid) {
-          return NextResponse.json({ error: validation.error }, { status: 400 });
-        }
-        updateData.resendApiKeyEncrypted = encrypt(apiKey);
-
-        // Auto-configure reply capture: create the inbound webhook in the
-        // customer's Resend account so replies/bounces flow back to us with
-        // zero manual setup. Best-effort — never blocks saving the key.
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
-        if (!appUrl || /localhost|127\.0\.0\.1/.test(appUrl)) {
-          webhookAutoSetup = 'skipped-localhost';
-        } else {
-          const webhook = await ensureResendWebhook(apiKey, `${appUrl.replace(/\/$/, '')}/api/webhooks/resend`);
-          if (webhook) {
-            updateData.resendWebhookId = webhook.webhookId;
-            if (webhook.signingSecret) {
-              updateData.resendWebhookSecretEncrypted = encrypt(webhook.signingSecret);
-            }
-            webhookAutoSetup = 'created';
-          } else {
-            webhookAutoSetup = 'failed';
-          }
-        }
-      }
-    }
-
+    // A campaign only owns its sender address — the Resend API key is
+    // account-level (RESEND_API_KEY, or Settings → API Keys when IS_BYOK=true).
     if (updateData.resendFromEmail) {
       const email = String(updateData.resendFromEmail).trim().toLowerCase();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -193,10 +162,27 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       data: updateData
     });
 
-    const { resendApiKeyEncrypted, resendWebhookSecretEncrypted, ...safeCampaign } = campaign as any;
+    // Saving a sender address is the moment reply capture becomes useful:
+    // make sure the webhook exists in the Resend account. Best-effort.
+    let replyTracking: string | null = null;
+    if (updateData.resendFromEmail) {
+      try {
+        replyTracking = await ensureResendReplyTracking(user.id);
+      } catch (err: any) {
+        console.error('Resend reply tracking setup failed:', err?.message);
+        replyTracking = 'failed';
+      }
+    }
+
+    const { resend: resendKeyConfigured } = await getByokConfiguredFlags(user.id);
     return NextResponse.json({
-      campaign: { ...safeCampaign, resendConfigured: !!resendApiKeyEncrypted },
-      ...(webhookAutoSetup ? { webhookAutoSetup } : {})
+      campaign: {
+        ...campaign,
+        isByok: isByokEnabled(),
+        resendKeyConfigured,
+        resendConfigured: resendKeyConfigured && !!campaign.resendFromEmail,
+      },
+      ...(replyTracking ? { replyTracking } : {})
     });
   } catch (error: any) {
     console.error('Update campaign error:', error);

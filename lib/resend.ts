@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
-import { decrypt } from '@/lib/encryption';
+import { encrypt } from '@/lib/encryption';
+import { isByokEnabled, resolveUserApiKey } from '@/lib/byok';
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
 
@@ -20,21 +21,31 @@ export interface CampaignResendSender {
 }
 
 /**
- * Resolves the Resend credentials configured on a campaign.
- * Returns null when the campaign has no Resend API key / sender email yet.
+ * Resolves the Resend API key the same way every other integration key is
+ * resolved: process.env.RESEND_API_KEY when IS_BYOK=false, the user's
+ * encrypted Settings key when IS_BYOK=true. Returns null when unconfigured.
  */
-export function getCampaignResendSender(campaign: {
-  resendApiKeyEncrypted?: string | null;
-  resendFromEmail?: string | null;
-}): CampaignResendSender | null {
-  if (!campaign?.resendApiKeyEncrypted || !campaign?.resendFromEmail) return null;
+export async function resolveResendApiKey(userId: string): Promise<string | null> {
   try {
-    const apiKey = decrypt(campaign.resendApiKeyEncrypted);
-    if (!apiKey) return null;
-    return { apiKey, fromEmail: campaign.resendFromEmail };
+    return await resolveUserApiKey(userId, 'resend');
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolves the sender for a campaign: the account-level Resend API key plus
+ * the campaign's own verified sender address. Returns null when either the
+ * key (env / Settings) or the campaign's sender email is missing.
+ */
+export async function resolveCampaignResendSender(
+  userId: string,
+  campaign: { resendFromEmail?: string | null }
+): Promise<CampaignResendSender | null> {
+  if (!campaign?.resendFromEmail) return null;
+  const apiKey = await resolveResendApiKey(userId);
+  if (!apiKey) return null;
+  return { apiKey, fromEmail: campaign.resendFromEmail };
 }
 
 /**
@@ -71,7 +82,11 @@ export async function sendViaResend(
   if (!res.ok) {
     const message = data?.message || `Resend API error (${res.status})`;
     if (res.status === 401 || res.status === 403) {
-      throw new Error('Invalid Resend API key. Update the key in this campaign\'s Sending Account settings.');
+      throw new Error(
+        isByokEnabled()
+          ? 'Invalid Resend API key. Update it in Settings → API Keys.'
+          : 'Invalid Resend API key. Update RESEND_API_KEY in the server environment.'
+      );
     }
     if (res.status === 422 && /domain/i.test(message)) {
       throw new Error(`Resend rejected the sender address: ${message}. Verify the domain of ${fromEmail} in your Resend dashboard.`);
@@ -148,6 +163,51 @@ export async function ensureResendWebhook(
     console.error('Resend webhook setup error:', err?.message);
     return null;
   }
+}
+
+export type ReplyTrackingStatus =
+  | 'active'
+  | 'no-key'
+  | 'skipped-localhost'
+  | 'failed';
+
+/**
+ * Makes sure reply/bounce tracking exists for this user's Resend account and
+ * remembers the webhook id + signing secret on their settings row. Idempotent
+ * and best-effort — callers treat a non-'active' result as informational.
+ */
+export async function ensureResendReplyTracking(userId: string): Promise<ReplyTrackingStatus> {
+  const apiKey = await resolveResendApiKey(userId);
+  if (!apiKey) return 'no-key';
+
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || '').trim();
+  if (!appUrl || /localhost|127\.0\.0\.1/.test(appUrl)) return 'skipped-localhost';
+
+  const webhook = await ensureResendWebhook(apiKey, `${appUrl.replace(/\/$/, '')}/api/webhooks/resend`);
+  if (!webhook) return 'failed';
+
+  const data: Record<string, string> = { resendWebhookId: webhook.webhookId };
+  // The signing secret is only returned when the webhook is first created —
+  // an existing webhook keeps whatever secret we already stored (or the
+  // RESEND_WEBHOOK_SECRET env fallback).
+  if (webhook.signingSecret) data.resendWebhookSecretEncrypted = encrypt(webhook.signingSecret);
+
+  await prisma.userSettings.upsert({
+    where: { userId },
+    update: data,
+    create: { userId, ...data },
+  });
+
+  return 'active';
+}
+
+/** Whether reply tracking is already wired up for this user. */
+export async function getResendReplyTrackingStatus(userId: string): Promise<boolean> {
+  const settings = await prisma.userSettings.findUnique({
+    where: { userId },
+    select: { resendWebhookId: true },
+  });
+  return !!settings?.resendWebhookId || !!process.env.RESEND_WEBHOOK_SECRET?.trim();
 }
 
 /**

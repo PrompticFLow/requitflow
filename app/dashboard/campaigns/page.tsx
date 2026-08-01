@@ -197,7 +197,7 @@ export default function CampaignsPage() {
               <span className={`w-3 h-3 rounded-full ${
                 camp.status === 'Active' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' :
                 camp.status === 'Draft' ? 'bg-slate-500' :
-                'bg-yellow-500 shadow-[0_0_8px_rgba(234,179,8,0.6)]'
+                'bg-yellow-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]'
               }`}></span>
               <span className="text-sm font-medium text-slate-400 uppercase tracking-wide">{camp.status}</span>
             </div>

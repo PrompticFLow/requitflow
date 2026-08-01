@@ -4,9 +4,10 @@ import nodemailer from 'nodemailer';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
 import {
   sendViaResend,
-  getCampaignResendSender,
+  resolveCampaignResendSender,
   campaignSentTodayCount,
   resolveReplyThreadingHeaders,
+  resolveResendApiKey,
 } from '@/lib/resend';
 import { fillMergeTags } from '@/lib/email/fill-merge-tags';
 
@@ -142,8 +143,8 @@ export async function sendCampaignEmail({
     return { success: false, error: safetyCheck.reason };
   }
 
-  // Priority 0: Campaign's own Resend API key + sender email
-  const resendSender = getCampaignResendSender(campaign as any);
+  // Priority 0: account-level Resend API key + the campaign's sender email
+  const resendSender = await resolveCampaignResendSender(user.id, campaign as any);
   if (resendSender) {
     try {
       const dailyCap = campaign.dailyLimit || 50;
@@ -177,7 +178,7 @@ export async function sendCampaignEmail({
       return { success: true, messageId: info.messageId };
     } catch (error: any) {
       console.error('Resend send error:', error?.message);
-      return { success: false, error: error?.message || 'Resend sending failed. Check this campaign\'s Resend API key and sender email.' };
+      return { success: false, error: error?.message || 'Resend sending failed. Check the Resend API key and this campaign\'s sender email.' };
     }
   }
 
@@ -315,6 +316,69 @@ export async function sendCampaignEmail({
   return { success: false, error: "No valid sending method found." };
 }
 
+/**
+ * Sends one already-created EmailSequence row right now, without waiting for the
+ * background scheduler tick. Used by the inbound-reply webhook so an AI
+ * auto-reply goes out the moment the reply lands.
+ *
+ * On failure the row is left Queued so the scheduler retries it on its next tick.
+ */
+export async function sendSequenceEmailNow(emailSequenceId: string) {
+  const email = await prisma.emailSequence.findUnique({
+    where: { id: emailSequenceId },
+    include: { campaign: true, lead: true }
+  });
+
+  if (!email) return { success: false, error: 'Email sequence not found.' };
+  if (email.status === 'Sent' || email.sentAt) {
+    return { success: false, error: 'Email has already been sent.' };
+  }
+
+  const sendLog = await prisma.emailSendLog.create({
+    data: {
+      campaignId: email.campaignId,
+      leadId: email.leadId,
+      emailSequenceId: email.id,
+      subject: email.subject,
+      body: email.body,
+      status: 'Sending'
+    }
+  });
+
+  const result = await sendCampaignEmail({
+    to: email.lead.email || '',
+    subject: email.subject,
+    html: /<[a-z][\s\S]*>/i.test(email.body) ? email.body : email.body.replace(/\n/g, '<br/>'),
+    campaignId: email.campaignId,
+    leadId: email.leadId,
+    emailSequenceId: email.id,
+    sendLogId: sendLog.id
+  });
+
+  if (result.success) {
+    await prisma.emailSequence.update({
+      where: { id: email.id },
+      data: { status: 'Sent', sentAt: new Date(), errorMessage: null }
+    });
+    await prisma.emailSendLog.update({
+      where: { id: sendLog.id },
+      data: { status: 'Sent', sentAt: new Date() }
+    });
+  } else {
+    // Keep it Queued so the background scheduler retries it later.
+    await prisma.emailSequence.update({
+      where: { id: email.id },
+      data: { status: 'Queued', errorMessage: result.error || 'Send failed' }
+    });
+    await prisma.emailSendLog.update({
+      where: { id: sendLog.id },
+      data: { status: 'Failed', errorMessage: result.error || 'Send failed' }
+    });
+  }
+
+  return result;
+}
+
 export interface ProcessDueEmailsOptions {
   userId?: string;
   limit?: number;
@@ -351,10 +415,10 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
     ]
   });
 
-  // Per-user daily send caps: the campaign's configured limit when its own
-  // Resend sender is set up, otherwise the legacy conservative default.
+  // Per-user daily send caps: the campaign's configured limit when a Resend
+  // sender is set up, otherwise the legacy conservative default.
   const resolveDailyCap = async (campaign: any): Promise<number> => {
-    if (campaign.resendApiKeyEncrypted && campaign.resendFromEmail) {
+    if (campaign.resendFromEmail && (await resolveResendApiKey(campaign.userId))) {
       return campaign.dailyLimit || 50;
     }
     return campaign.dailyLimit || 10;

@@ -393,15 +393,21 @@ Output ONLY valid JSON matching this schema:
     where: { userId: matchedUser.id }
   });
   const globalAutoSend = userSettings?.autoSendMode === true;
-  const campaignAutoSend = matchedCampaign && matchedCampaign.autoReplyEnabled && matchedCampaign.autoReplyMode === 'auto_send_safe';
 
-  if ((campaignAutoSend || globalAutoSend) && canAutoSend) {
+  // The campaign's "AI Reply Handling" mode is the authority whenever the reply
+  // was matched to a campaign: only "Auto-send Safe Replies" ever sends by
+  // itself. "Draft First" and "Manual Only" never auto-send, even if the global
+  // AI Auto-Reply toggle in Settings is on. The global toggle only covers
+  // replies that couldn't be matched to any campaign.
+  const autoSendAllowed = matchedCampaign
+    ? matchedCampaign.autoReplyEnabled === true && matchedCampaign.autoReplyMode === 'auto_send_safe'
+    : globalAutoSend;
+
+  if (autoSendAllowed && canAutoSend) {
     if (confidence >= 0.85 && classification !== 'Unsubscribe' && classification !== 'Not interested') {
       aiReplyStatus = 'Queued';
-      const min = matchedCampaign?.replyDelayMinMinutes ?? 1;
-      const max = matchedCampaign?.replyDelayMaxMinutes ?? 2;
-      const delayMins = Math.floor(Math.random() * (max - min + 1)) + min;
-      aiReplyScheduledAt = new Date(Date.now() + delayMins * 60000);
+      // Sent inline below, as soon as the webhook lands — no scheduler wait.
+      aiReplyScheduledAt = new Date();
     }
   }
 
@@ -430,9 +436,12 @@ Output ONLY valid JSON matching this schema:
     }
   });
 
-  // Inject auto-reply into EmailSequence to be picked up by the sender cron
+  // Auto-send mode: create the reply email and send it immediately, right here
+  // on the webhook hit. If the send fails it stays Queued and the background
+  // scheduler retries it on its next tick.
+  let autoReplySent = false;
   if (aiReplyStatus === 'Queued' && aiReplyScheduledAt && matchedUser && matchedCampaign && matchedLead) {
-    await prisma.emailSequence.create({
+    const replySequence = await prisma.emailSequence.create({
       data: {
         userId: matchedUser.id,
         campaignId: matchedCampaign.id,
@@ -445,6 +454,23 @@ Output ONLY valid JSON matching this schema:
         scheduledAt: aiReplyScheduledAt,
       }
     });
+
+    try {
+      const { sendSequenceEmailNow } = await import('./email-dispatch');
+      const sendResult = await sendSequenceEmailNow(replySequence.id);
+      if (sendResult.success) {
+        autoReplySent = true;
+        aiReplyStatus = 'Sent';
+        await prisma.emailReply.update({
+          where: { id: newReply.id },
+          data: { aiReplyStatus: 'Sent', status: 'Handled' }
+        });
+      } else {
+        console.error('Immediate AI auto-reply send failed:', sendResult.error);
+      }
+    } catch (err: any) {
+      console.error('Immediate AI auto-reply send threw:', err?.message);
+    }
   }
 
   return {
@@ -453,6 +479,7 @@ Output ONLY valid JSON matching this schema:
     replyId: newReply.id,
     classification,
     aiReplyStatus,
+    autoReplySent,
     futureFollowUpsCancelled
   };
 }

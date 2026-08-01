@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import nodemailer from 'nodemailer';
 import { decryptSmtpPass } from '@/lib/smtp-encryption';
 import sgMail from '@sendgrid/mail';
-import { sendViaResend, getCampaignResendSender } from '@/lib/resend';
+import { sendViaResend, resolveCampaignResendSender } from '@/lib/resend';
 import { buildReplySubject } from '@/lib/email/reply-subject';
 
 export const maxDuration = 300;
@@ -43,8 +43,30 @@ export async function GET(req: Request) {
         continue;
       }
 
+      // The reply handler already creates a step-99 EmailSequence for every
+      // auto-send reply (sent inline on the webhook, retried by the background
+      // scheduler if that failed). Skip those here so the same reply can never
+      // go out twice.
+      const existingReplySequence = await prisma.emailSequence.findFirst({
+        where: {
+          campaignId: reply.campaignId || undefined,
+          leadId: reply.leadId || undefined,
+          sequenceStep: { gte: 99 },
+          createdAt: { gte: reply.createdAt }
+        }
+      });
+      if (existingReplySequence) {
+        if (existingReplySequence.status === 'Sent') {
+          await prisma.emailReply.update({
+            where: { id: reply.id },
+            data: { aiReplyStatus: 'Sent', status: 'Handled' }
+          });
+        }
+        continue;
+      }
+
       try {
-        const resendSender = getCampaignResendSender(reply.campaign as any);
+        const resendSender = await resolveCampaignResendSender(reply.userId, reply.campaign as any);
 
         const smtpAccount = await prisma.smtpAccount.findUnique({
           where: { userId: reply.userId }
