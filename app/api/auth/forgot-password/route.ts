@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { sendViaResend } from '@/lib/resend';
 import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 
@@ -36,46 +37,60 @@ export async function POST(req: Request) {
       </div>
     `;
 
-    // Try ANY verified SMTP account in the system (not just the requesting user's)
-    const smtpAccount = await prisma.smtpAccount.findFirst({
-      where: { isVerified: true, status: 'Active', smtpHost: { not: '' } }
-    });
+    const resendApiKey = process.env.RESEND_API_KEY?.trim();
+    const resendFrom = process.env.RESEND_MAIL_FROM?.trim();
 
-    if (smtpAccount) {
-      const { decryptSmtpPass } = await import('@/lib/smtp-encryption');
-      const smtpPassword = decryptSmtpPass(smtpAccount.smtpPassEncrypted!);
-      const smtpUsername = decryptSmtpPass(smtpAccount.smtpUserEncrypted!);
-
-      const transporter = nodemailer.createTransport({
-        host: smtpAccount.smtpHost,
-        port: smtpAccount.smtpPort,
-        secure: smtpAccount.secure,
-        auth: { user: smtpUsername, pass: smtpPassword },
-        tls: { rejectUnauthorized: false }
-      });
-
-      await transporter.sendMail({
-        from: `"FunnelZen AI" <${smtpAccount.fromEmail}>`,
+    if (resendApiKey && resendFrom) {
+      await sendViaResend(resendApiKey, {
         to: email.trim(),
         subject: 'Reset Your FunnelZen AI Password',
-        html: htmlBody
+        html: htmlBody,
+        fromEmail: resendFrom,
+        fromName: 'FunnelZen AI',
       });
-
-      console.log(`[Forgot Password] Reset email sent to ${email} via ${smtpAccount.smtpHost}`);
-    } else if (process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM_EMAIL) {
-      // Fallback: SendGrid
-      const sgMail = (await import('@sendgrid/mail')).default;
-      sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-      await sgMail.send({
-        to: email.trim(),
-        from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'FunnelZen AI' },
-        subject: 'Reset Your FunnelZen AI Password',
-        html: htmlBody
-      });
-      console.log(`[Forgot Password] Reset email sent to ${email} via SendGrid`);
+      console.log(`[Forgot Password] Reset email sent to ${email} via Resend`);
     } else {
-      // Dev fallback — print link to terminal
-      console.log(`\n[Forgot Password - DEV] Reset link for ${email}:\n${resetUrl}\n`);
+      // Fallback: any verified SMTP account in the system
+      const smtpAccount = await prisma.smtpAccount.findFirst({
+        where: { isVerified: true, status: 'Active', smtpHost: { not: '' } }
+      });
+
+      if (smtpAccount) {
+        const { decryptSmtpPass } = await import('@/lib/smtp-encryption');
+        const smtpPassword = decryptSmtpPass(smtpAccount.smtpPassEncrypted!);
+        const smtpUsername = decryptSmtpPass(smtpAccount.smtpUserEncrypted!);
+
+        const transporter = nodemailer.createTransport({
+          host: smtpAccount.smtpHost,
+          port: smtpAccount.smtpPort,
+          secure: smtpAccount.secure,
+          auth: { user: smtpUsername, pass: smtpPassword },
+          tls: { rejectUnauthorized: false }
+        });
+
+        await transporter.sendMail({
+          from: `"FunnelZen AI" <${smtpAccount.fromEmail}>`,
+          to: email.trim(),
+          subject: 'Reset Your FunnelZen AI Password',
+          html: htmlBody
+        });
+
+        console.log(`[Forgot Password] Reset email sent to ${email} via ${smtpAccount.smtpHost}`);
+      } else if (process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM_EMAIL) {
+        // Fallback: SendGrid
+        const sgMail = (await import('@sendgrid/mail')).default;
+        sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+        await sgMail.send({
+          to: email.trim(),
+          from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'FunnelZen AI' },
+          subject: 'Reset Your FunnelZen AI Password',
+          html: htmlBody
+        });
+        console.log(`[Forgot Password] Reset email sent to ${email} via SendGrid`);
+      } else {
+        // Dev fallback — print link to terminal
+        console.log(`\n[Forgot Password - DEV] Reset link for ${email}:\n${resetUrl}\n`);
+      }
     }
 
     return NextResponse.json({ success: true });

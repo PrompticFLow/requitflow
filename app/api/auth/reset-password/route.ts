@@ -10,7 +10,9 @@ export async function POST(req: Request) {
     if (password.length < 8) return NextResponse.json({ error: 'Password must be at least 8 characters.' }, { status: 400 });
 
     const decoded = await verifyToken(token);
-    if (!decoded) return NextResponse.json({ error: 'Reset link is invalid or has expired. Please request a new one.' }, { status: 400 });
+    if (!decoded || decoded.purpose !== 'reset') {
+      return NextResponse.json({ error: 'Reset link is invalid or has expired. Please request a new one.' }, { status: 400 });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
