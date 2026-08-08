@@ -10,8 +10,11 @@ import {
 import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
 import {
   parseHtmlEmailTemplates,
+  parseUniversalTemplate,
   validateHtmlTemplatesForSteps,
   applyHtmlTemplateForLead,
+  applyUniversalTemplate,
+  universalTemplateLabel,
   htmlTemplateDelayDays,
 } from '@/lib/email/html-templates';
 
@@ -43,17 +46,33 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const senderName = campaign.senderName || user.name || '';
     const stepCount = sequenceStepCount(campaign);
     const isHtmlMode = (campaign.emailBodyMode || 'ai') === 'html';
-    const htmlTemplates = parseHtmlEmailTemplates(campaign.htmlEmailTemplates);
 
-    if (isHtmlMode) {
+    // v2: one universal built-in template wrapping AI-written copy.
+    const universalTemplate = isHtmlMode ? parseUniversalTemplate(campaign.htmlEmailTemplates) : null;
+    // v1 (legacy): raw HTML uploaded per sequence step, no AI involved.
+    const htmlTemplates = isHtmlMode && !universalTemplate
+      ? parseHtmlEmailTemplates(campaign.htmlEmailTemplates)
+      : {};
+    const useLegacyHtml = isHtmlMode && !universalTemplate && Object.keys(htmlTemplates).length > 0;
+
+    if (isHtmlMode && !universalTemplate && !useLegacyHtml) {
+      return NextResponse.json(
+        { error: 'Pick an email template before generating. Turn on "Use email template" and choose one from the gallery.' },
+        { status: 400 }
+      );
+    }
+
+    if (useLegacyHtml) {
       const validation = validateHtmlTemplatesForSteps(htmlTemplates, stepCount);
       if (!validation.ok) {
         return NextResponse.json({ error: validation.error }, { status: 400 });
       }
     }
 
+    const ctaUrl = campaign.bookingLink || campaign.ctaLink || '';
+
     let openRouterApiKey: string | null = null;
-    if (!isHtmlMode) {
+    if (!useLegacyHtml) {
       try {
         openRouterApiKey = await resolveUserApiKey(user.id, 'openrouter');
       } catch (e: any) {
@@ -83,7 +102,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
       let data: Record<string, any>;
 
-      if (isHtmlMode) {
+      if (useLegacyHtml) {
         const template = htmlTemplates[String(stepNum)];
         const applied = applyHtmlTemplateForLead(template, mergeCtx(lead));
         const delayAmount =
@@ -112,18 +131,27 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           existing,
           openRouterApiKey!
         );
+        const applied = universalTemplate
+          ? applyUniversalTemplate(
+              universalTemplate,
+              { subject: generated.subject, body: generated.body, ctaUrl },
+              mergeCtx(lead)
+            )
+          : { subject: generated.subject, body: generated.body };
         data = {
           name: `Email ${stepNum}`,
-          subject: generated.subject,
-          body: generated.body,
-          aiOriginalSubject: generated.subject,
-          aiOriginalBody: generated.body,
-          emailType: generated.type || null,
+          subject: applied.subject,
+          body: applied.body,
+          aiOriginalSubject: applied.subject,
+          aiOriginalBody: applied.body,
+          emailType: universalTemplate ? universalTemplateLabel(universalTemplate) : (generated.type || null),
           delayAmount: generated.delayDays,
           delayUnit: 'business_days',
           status: 'Draft',
           approvalStatus: 'Pending',
-          aiGenerationReason: `Regenerated from lead research data — ${trackLabel(lead)}`,
+          aiGenerationReason: universalTemplate
+            ? `AI copy in the "${universalTemplateLabel(universalTemplate)}" template — ${trackLabel(lead)}`
+            : `Regenerated from lead research data — ${trackLabel(lead)}`,
         };
       }
 
@@ -179,7 +207,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
         let created = 0;
 
-        if (isHtmlMode) {
+        if (useLegacyHtml) {
           for (const stepNum of missingSteps) {
             const template = htmlTemplates[String(stepNum)];
             const applied = applyHtmlTemplateForLead(template, mergeCtx(lead));
@@ -216,24 +244,33 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
           for (const email of emails) {
             if (!missingSteps.includes(email.step)) continue;
+            const applied = universalTemplate
+              ? applyUniversalTemplate(
+                  universalTemplate,
+                  { subject: email.subject, body: email.body, ctaUrl },
+                  mergeCtx(lead)
+                )
+              : { subject: email.subject, body: email.body };
             await prisma.emailSequence.create({
               data: {
                 userId: user.id,
                 campaignId,
                 leadId: lead.id,
                 name: `Email ${email.step}`,
-                subject: email.subject,
-                body: email.body,
+                subject: applied.subject,
+                body: applied.body,
                 sequenceStep: email.step,
-                ctaLink: campaign.bookingLink || campaign.ctaLink || '',
+                ctaLink: ctaUrl,
                 delayAmount: email.delayDays,
                 delayUnit: 'business_days',
                 status: 'Draft',
                 approvalStatus: 'Pending',
-                aiOriginalSubject: email.subject,
-                aiOriginalBody: email.body,
-                emailType: email.type || null,
-                aiGenerationReason: `Generated from lead research data — ${trackLabel(lead)}`,
+                aiOriginalSubject: applied.subject,
+                aiOriginalBody: applied.body,
+                emailType: universalTemplate ? universalTemplateLabel(universalTemplate) : (email.type || null),
+                aiGenerationReason: universalTemplate
+                  ? `AI copy in the "${universalTemplateLabel(universalTemplate)}" template — ${trackLabel(lead)}`
+                  : `Generated from lead research data — ${trackLabel(lead)}`,
               }
             });
             created++;
@@ -269,9 +306,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       }, { status: 500 });
     }
 
-    let message = isHtmlMode
+    let message = useLegacyHtml
       ? `Applied HTML templates to create ${generatedCount} email drafts.`
-      : `Created ${generatedCount} email drafts.`;
+      : universalTemplate
+        ? `Created ${generatedCount} email drafts in the "${universalTemplateLabel(universalTemplate)}" template.`
+        : `Created ${generatedCount} email drafts.`;
     if (skippedCount > 0) message += ` ${skippedCount} leads already had full sequences.`;
     if (failedCount > 0) message += ` ${failedCount} leads failed.`;
 

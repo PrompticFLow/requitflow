@@ -2,20 +2,12 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Loader2, Mail, Users, Check, RefreshCw, Save, AlertTriangle, CheckCircle2, X, Search, Pencil, MessageSquare, Send, ArrowLeft, Calendar, ExternalLink, Upload, FileCode } from "lucide-react";
+import { Loader2, Mail, Users, Check, RefreshCw, Save, AlertTriangle, CheckCircle2, X, Search, Pencil, MessageSquare, Send, ArrowLeft, Calendar, ExternalLink, Palette, FileCode } from "lucide-react";
 import { extractLatestReplyText } from "@/lib/email/strip-quoted-reply";
+import EmailTemplatePicker from "@/components/email-template-picker";
+import { getTemplateMeta, resolveDesign, type EmailTemplateDesign } from "@/lib/email/email-templates";
 
-const HTML_MERGE_TAG_HINTS = [
-  '{{firstName}}',
-  '{{companyName}}',
-  '{{jobTitle}}',
-  '{{industry}}',
-  '{{yourName}}',
-  '{{bookingLink}}',
-  '{{cta}}',
-];
-
-type HtmlStepTemplateDraft = { subject: string; html: string; fileName?: string };
+type TemplateConfig = { templateId: string; design: Partial<EmailTemplateDesign> };
 export default function CampaignDetailPage() {
   const params = useParams();
   const campaignId = params.id as string;
@@ -51,10 +43,12 @@ export default function CampaignDetailPage() {
   const [startingLeads, setStartingLeads] = useState(false);
   const [editLeadModal, setEditLeadModal] = useState<any | null>(null);
 
-  // HTML email template mode
+  // Universal email template (one design for the whole sequence)
   const [emailBodyMode, setEmailBodyMode] = useState<'ai' | 'html'>('ai');
-  const [htmlTemplatesDraft, setHtmlTemplatesDraft] = useState<Record<string, HtmlStepTemplateDraft>>({});
+  const [templateConfig, setTemplateConfig] = useState<TemplateConfig | null>(null);
+  const [legacyHtmlStepCount, setLegacyHtmlStepCount] = useState(0);
   const [savingHtmlTemplates, setSavingHtmlTemplates] = useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
 
   // Offer editing state
   const [editingOffer, setEditingOffer] = useState(false);
@@ -171,102 +165,57 @@ export default function CampaignDetailPage() {
   const seqStepCount = campaignData?.emailSequenceCount > 0 ? Math.min(campaignData.emailSequenceCount, 10) : 4;
   const SEQ_STEPS = Array.from({ length: seqStepCount }, (_, i) => i + 1);
 
-  const htmlTemplatesReady = SEQ_STEPS.every(step => {
-    const t = htmlTemplatesDraft[String(step)];
-    return !!(t?.subject?.trim() && t?.html?.trim());
-  });
+  const templateReady = !!templateConfig || legacyHtmlStepCount > 0;
+  const templateMeta = templateConfig ? getTemplateMeta(templateConfig.templateId) : null;
+  const templateDesign = templateConfig ? resolveDesign(templateConfig.templateId, templateConfig.design) : null;
+  const campaignCtaLink = campaignData?.bookingLink || campaignData?.ctaLink || '';
 
-  const persistHtmlTemplates = async (
-    mode: 'ai' | 'html',
-    templates: Record<string, HtmlStepTemplateDraft>
-  ) => {
+  const persistTemplate = async (mode: 'ai' | 'html', config: TemplateConfig | null) => {
     setSavingHtmlTemplates(true);
     try {
-      const payload: Record<string, { subject: string; html: string }> = {};
-      for (const [key, value] of Object.entries(templates)) {
-        payload[key] = { subject: value.subject || '', html: value.html || '' };
-      }
       const res = await fetch(`/api/campaigns/${campaignId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           emailBodyMode: mode,
-          htmlEmailTemplates: payload,
+          // Omitted when turning the template off, so the saved design is kept.
+          ...(config ? { htmlEmailTemplates: config } : {}),
         }),
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error || 'Failed to save HTML templates.');
+        alert(data.error || 'Failed to save the email template.');
         return false;
       }
       if (data.campaign) setCampaignData(data.campaign);
       return true;
     } catch (e) {
       console.error(e);
-      alert('Failed to save HTML templates.');
+      alert('Failed to save the email template.');
       return false;
     } finally {
       setSavingHtmlTemplates(false);
     }
   };
 
-  const handleEmailBodyModeChange = async (mode: 'ai' | 'html') => {
-    setEmailBodyMode(mode);
-    await persistHtmlTemplates(mode, htmlTemplatesDraft);
-  };
-
-  const handleHtmlSubjectChange = (step: number, subject: string) => {
-    setHtmlTemplatesDraft(prev => ({
-      ...prev,
-      [String(step)]: {
-        subject,
-        html: prev[String(step)]?.html || '',
-        fileName: prev[String(step)]?.fileName,
-      },
-    }));
-  };
-
-  const handleHtmlSubjectBlur = async (step: number, subject: string) => {
-    const next = {
-      ...htmlTemplatesDraft,
-      [String(step)]: {
-        subject,
-        html: htmlTemplatesDraft[String(step)]?.html || '',
-        fileName: htmlTemplatesDraft[String(step)]?.fileName,
-      },
-    };
-    setHtmlTemplatesDraft(next);
-    await persistHtmlTemplates(emailBodyMode, next);
-  };
-
-  const handleHtmlFileUpload = async (step: number, file: File | null) => {
-    if (!file) return;
-    if (!/\.html?$/i.test(file.name) && file.type !== 'text/html') {
-      return alert('Please upload an .html file.');
+  // The switch opens the picker; the mode only flips once a template is chosen.
+  const handleToggleTemplateMode = async (on: boolean) => {
+    if (on) {
+      setTemplatePickerOpen(true);
+      return;
     }
-    if (file.size > 500_000) {
-      return alert('HTML file must be under 500KB.');
-    }
-    const html = await file.text();
-    if (!html.trim()) return alert('That HTML file is empty.');
-    const next = {
-      ...htmlTemplatesDraft,
-      [String(step)]: {
-        subject: htmlTemplatesDraft[String(step)]?.subject || '',
-        html,
-        fileName: file.name,
-      },
-    };
-    setHtmlTemplatesDraft(next);
-    await persistHtmlTemplates(emailBodyMode === 'ai' ? 'html' : emailBodyMode, next);
-    if (emailBodyMode === 'ai') setEmailBodyMode('html');
+    setEmailBodyMode('ai');
+    await persistTemplate('ai', null);
   };
 
-  const handleClearHtmlStep = async (step: number) => {
-    const next = { ...htmlTemplatesDraft };
-    delete next[String(step)];
-    setHtmlTemplatesDraft(next);
-    await persistHtmlTemplates(emailBodyMode, next);
+  const handleSaveTemplate = async (templateId: string, design: EmailTemplateDesign) => {
+    const config: TemplateConfig = { templateId, design };
+    const ok = await persistTemplate('html', config);
+    if (!ok) return;
+    setTemplateConfig(config);
+    setLegacyHtmlStepCount(0);
+    setEmailBodyMode('html');
+    setTemplatePickerOpen(false);
   };
 
   const fetchBookedMeetings = async () => {
@@ -301,18 +250,23 @@ export default function CampaignDetailPage() {
         const mode = campaign?.emailBodyMode === 'html' ? 'html' : 'ai';
         setEmailBodyMode(mode);
         const raw = campaign?.htmlEmailTemplates && typeof campaign.htmlEmailTemplates === 'object'
-          ? campaign.htmlEmailTemplates
+          ? (campaign.htmlEmailTemplates as Record<string, any>)
           : {};
-        const next: Record<string, HtmlStepTemplateDraft> = {};
-        for (const [key, value] of Object.entries(raw as Record<string, any>)) {
-          if (!value || typeof value !== 'object') continue;
-          next[key] = {
-            subject: typeof value.subject === 'string' ? value.subject : '',
-            html: typeof value.html === 'string' ? value.html : '',
-            fileName: typeof value.html === 'string' && value.html.trim() ? `Email ${key}.html` : undefined,
-          };
+        if (typeof raw.templateId === 'string' && raw.templateId) {
+          setTemplateConfig({
+            templateId: raw.templateId,
+            design: raw.design && typeof raw.design === 'object' ? raw.design : {},
+          });
+          setLegacyHtmlStepCount(0);
+        } else {
+          // Campaign still on the old per-step HTML upload setup.
+          const legacySteps = Object.entries(raw).filter(
+            ([key, value]: [string, any]) =>
+              /^\d+$/.test(key) && value && typeof value === 'object' && typeof value.html === 'string' && value.html.trim()
+          ).length;
+          setTemplateConfig(null);
+          setLegacyHtmlStepCount(legacySteps);
         }
-        setHtmlTemplatesDraft(next);
       }
 
       if (repliesRes.ok) {
@@ -369,8 +323,9 @@ export default function CampaignDetailPage() {
   }, [campaignId]);
 
   const handleGenerateLeadSequences = async () => {
-    if (emailBodyMode === 'html' && !htmlTemplatesReady) {
-      return alert(`Upload a subject and HTML file for every email step (1–${seqStepCount}) before generating.`);
+    if (emailBodyMode === 'html' && !templateReady) {
+      setTemplatePickerOpen(true);
+      return alert('Pick an email template before generating.');
     }
 
     const missing = campaignLeads.filter(cl => {
@@ -379,11 +334,7 @@ export default function CampaignDetailPage() {
     }).map(cl => cl.leadId);
 
     if (missing.length === 0) {
-      return alert(
-        emailBodyMode === 'html'
-          ? "All leads already have a full email sequence. Use Re-apply on a cell to refresh from the HTML template."
-          : "All leads already have a full email sequence. Use the regenerate icon on a cell to rewrite an individual email."
-      );
+      return alert("All leads already have a full email sequence. Use the regenerate icon on a cell to rewrite an individual email.");
     }
 
     setSeqGenerating(true);
@@ -391,9 +342,7 @@ export default function CampaignDetailPage() {
     for (let i = 0; i < missing.length; i += batchSize) {
       const batch = missing.slice(i, i + batchSize);
       setSeqProgress(
-        emailBodyMode === 'html'
-          ? `Applying HTML templates for leads ${i + 1}–${Math.min(i + batchSize, missing.length)} of ${missing.length}...`
-          : `Generating email sequences for leads ${i + 1}–${Math.min(i + batchSize, missing.length)} of ${missing.length}...`
+        `Generating email sequences for leads ${i + 1}–${Math.min(i + batchSize, missing.length)} of ${missing.length}...`
       );
       try {
         const res = await fetch(`/api/campaigns/${campaignId}/generate-lead-emails`, {
@@ -1013,24 +962,20 @@ export default function CampaignDetailPage() {
                  <Users className="text-purple-400" size={20} /> Campaign Leads
                </h3>
                <p className="text-sm text-slate-400">
-                 {emailBodyMode === 'html'
-                   ? `HTML templates are personalized per lead with merge tags (name, company, etc.) across a ${seqStepCount}-step sequence.`
+                 {emailBodyMode === 'html' && templateMeta
+                   ? `AI writes a unique ${seqStepCount}-step sequence per lead and renders every email in your "${templateMeta.name}" template.`
                    : `AI writes a unique ${seqStepCount}-step email sequence per lead — Track A for companies actively hiring, Track B nurture for future potential.`}
                </p>
              </div>
              <div className="flex space-x-3 items-center">
                <button
                  onClick={handleGenerateLeadSequences}
-                 disabled={seqGenerating || (emailBodyMode === 'html' && !htmlTemplatesReady)}
-                 title={emailBodyMode === 'html' && !htmlTemplatesReady ? 'Upload subject + HTML for every sequence step first' : undefined}
+                 disabled={seqGenerating || (emailBodyMode === 'html' && !templateReady)}
+                 title={emailBodyMode === 'html' && !templateReady ? 'Pick an email template first' : undefined}
                  className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors shadow-lg shadow-green-500/25 text-sm font-bold flex items-center gap-2 disabled:opacity-50"
                >
                  {seqGenerating ? <Loader2 className="animate-spin" size={16} /> : <Mail size={16} />}
-                 <span>
-                   {seqGenerating
-                     ? (emailBodyMode === 'html' ? 'Applying...' : 'Generating...')
-                     : (emailBodyMode === 'html' ? 'Apply HTML Templates' : 'Generate Email Sequences')}
-                 </span>
+                 <span>{seqGenerating ? 'Generating...' : 'Generate Email Sequences'}</span>
                </button>
                <button
                  onClick={() => window.location.href = '/dashboard/leads'}
@@ -1045,98 +990,85 @@ export default function CampaignDetailPage() {
              <div className="flex flex-wrap items-center justify-between gap-3">
                <div>
                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                   <FileCode size={16} className="text-purple-400" /> Email body
+                   <FileCode size={16} className="text-purple-400" /> Email design
                  </h4>
                  <p className="text-xs text-slate-400 mt-0.5">
-                   Choose AI-written copy or upload your own HTML per sequence step.
+                   Off, emails send as plain text. On, every AI-written email is wrapped in one designed template.
                    {savingHtmlTemplates && <span className="ml-2 text-purple-300">Saving…</span>}
                  </p>
                </div>
-               <div className="flex rounded-lg border border-slate-700 overflow-hidden text-xs font-semibold">
+               <div className="flex items-center gap-2.5">
+                 <span className={`text-xs font-semibold ${emailBodyMode === 'html' ? 'text-white' : 'text-slate-400'}`}>
+                   Use email template
+                 </span>
                  <button
                    type="button"
-                   onClick={() => handleEmailBodyModeChange('ai')}
-                   className={`px-3 py-1.5 transition-colors ${emailBodyMode === 'ai' ? 'bg-purple-600 text-white' : 'bg-slate-950 text-slate-400 hover:text-white'}`}
+                   role="switch"
+                   aria-checked={emailBodyMode === 'html' || templatePickerOpen}
+                   disabled={savingHtmlTemplates}
+                   onClick={() => handleToggleTemplateMode(!(emailBodyMode === 'html'))}
+                   className={`w-12 h-6 rounded-full relative transition-colors disabled:opacity-60 ${
+                     emailBodyMode === 'html' || templatePickerOpen ? 'bg-purple-600' : 'bg-slate-700'
+                   }`}
                  >
-                   AI-written
-                 </button>
-                 <button
-                   type="button"
-                   onClick={() => handleEmailBodyModeChange('html')}
-                   className={`px-3 py-1.5 transition-colors ${emailBodyMode === 'html' ? 'bg-purple-600 text-white' : 'bg-slate-950 text-slate-400 hover:text-white'}`}
-                 >
-                   HTML template
+                   <span
+                     className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
+                       emailBodyMode === 'html' || templatePickerOpen ? 'left-[26px]' : 'left-0.5'
+                     }`}
+                   />
                  </button>
                </div>
              </div>
 
-             {emailBodyMode === 'html' && (
-               <>
-                 <p className="text-[11px] text-slate-500">
-                   Use merge tags in subject or HTML:{' '}
-                   {HTML_MERGE_TAG_HINTS.map((tag, i) => (
-                     <code key={tag} className="text-purple-300/90">{tag}{i < HTML_MERGE_TAG_HINTS.length - 1 ? ', ' : ''}</code>
-                   ))}
-                 </p>
-                 <div className="space-y-3">
-                   {SEQ_STEPS.map(step => {
-                     const draft = htmlTemplatesDraft[String(step)];
-                     const hasHtml = !!(draft?.html?.trim());
-                     return (
-                       <div key={step} className="grid grid-cols-1 md:grid-cols-[auto_1fr_auto] gap-3 items-start bg-slate-950/60 border border-slate-800 rounded-xl p-3">
-                         <div className="text-xs font-bold text-slate-300 pt-2 w-16">Email {step}</div>
-                         <div className="space-y-2 min-w-0">
-                           <input
-                             type="text"
-                             value={draft?.subject || ''}
-                             onChange={e => handleHtmlSubjectChange(step, e.target.value)}
-                             onBlur={e => handleHtmlSubjectBlur(step, e.target.value)}
-                             placeholder="Subject (supports {{firstName}}, …)"
-                             className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-white text-sm focus:border-purple-500 outline-none"
-                           />
-                           <div className="flex flex-wrap items-center gap-2 text-xs">
-                             <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded cursor-pointer border border-slate-700">
-                               <Upload size={13} />
-                               {hasHtml ? 'Replace HTML' : 'Upload .html'}
-                               <input
-                                 type="file"
-                                 accept=".html,.htm,text/html"
-                                 className="hidden"
-                                 onChange={e => {
-                                   const file = e.target.files?.[0] || null;
-                                   handleHtmlFileUpload(step, file);
-                                   e.target.value = '';
-                                 }}
-                               />
-                             </label>
-                             {hasHtml && (
-                               <>
-                                 <span className="text-green-400 truncate max-w-[200px]" title={draft?.fileName}>
-                                   {draft?.fileName || 'HTML uploaded'}
-                                 </span>
-                                 <button
-                                   type="button"
-                                   onClick={() => handleClearHtmlStep(step)}
-                                   className="text-slate-400 hover:text-red-400"
-                                 >
-                                   Clear
-                                 </button>
-                               </>
-                             )}
-                             {!hasHtml && <span className="text-yellow-500/80">HTML required</span>}
-                             {hasHtml && !draft?.subject?.trim() && <span className="text-yellow-500/80">Subject required</span>}
-                           </div>
-                         </div>
-                       </div>
-                     );
-                   })}
+             {emailBodyMode === 'html' && templateMeta && templateDesign && (
+               <div className="flex flex-wrap items-center gap-4 bg-slate-950/60 border border-slate-800 rounded-xl p-3">
+                 <div
+                   className="w-11 h-14 rounded-md border border-black/30 shrink-0 p-1"
+                   style={{ background: templateDesign.backgroundColor }}
+                 >
+                   <div
+                     className="w-full h-full rounded-sm flex flex-col gap-1 p-1"
+                     style={{ background: templateDesign.contentBackground }}
+                   >
+                     <div style={{ height: 3, background: templateDesign.accentColor, borderRadius: 2 }} />
+                     <div style={{ height: 2, background: templateDesign.textColor, opacity: 0.3, borderRadius: 2 }} />
+                     <div style={{ height: 2, width: '70%', background: templateDesign.textColor, opacity: 0.3, borderRadius: 2 }} />
+                     {templateDesign.showButton && (
+                       <div style={{ height: 5, width: 18, background: templateDesign.buttonColor, borderRadius: 2, marginTop: 'auto' }} />
+                     )}
+                   </div>
                  </div>
-                 {!htmlTemplatesReady && (
-                   <p className="text-xs text-yellow-500/90">
-                     Add a subject and HTML file for every step before applying templates to leads.
+                 <div className="min-w-0">
+                   <p className="text-sm font-bold text-white">{templateMeta.name}</p>
+                   <p className="text-[11px] text-slate-400">
+                     {templateMeta.category} · applied to all {seqStepCount} emails in the sequence
                    </p>
-                 )}
-               </>
+                 </div>
+                 <div className="flex items-center gap-1.5">
+                   {[templateDesign.accentColor, templateDesign.buttonColor, templateDesign.backgroundColor, templateDesign.contentBackground].map((c, i) => (
+                     <span
+                       key={i}
+                       title={c}
+                       className="w-4 h-4 rounded-full border border-slate-700"
+                       style={{ background: c }}
+                     />
+                   ))}
+                 </div>
+                 <button
+                   type="button"
+                   onClick={() => setTemplatePickerOpen(true)}
+                   className="ml-auto px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5"
+                 >
+                   <Palette size={13} className="text-purple-400" /> Change / customize
+                 </button>
+               </div>
+             )}
+
+             {emailBodyMode === 'html' && !templateConfig && legacyHtmlStepCount > 0 && (
+               <p className="text-xs text-yellow-500/90">
+                 This campaign still uses the old per-step HTML upload ({legacyHtmlStepCount} step{legacyHtmlStepCount === 1 ? '' : 's'}).
+                 It keeps working, but pick a template above to move to the new system.
+               </p>
              )}
            </div>
 
@@ -1277,7 +1209,7 @@ export default function CampaignDetailPage() {
                                      {!isSent && (
                                        <button
                                          onClick={() => handleRegenerateCell(lead, step)}
-                                         title={emailBodyMode === 'html' ? 'Re-apply HTML template for this lead' : 'Regenerate this email'}
+                                         title="Regenerate this email"
                                          className="text-slate-500 hover:text-purple-400 transition-colors shrink-0"
                                        >
                                          <RefreshCw size={13} />
@@ -1349,6 +1281,16 @@ export default function CampaignDetailPage() {
           onClose={() => setEmailModal(null)}
         />
       )}
+
+      <EmailTemplatePicker
+        open={templatePickerOpen}
+        initialTemplateId={templateConfig?.templateId || null}
+        initialDesign={templateConfig?.design || null}
+        ctaUrl={campaignCtaLink}
+        saving={savingHtmlTemplates}
+        onClose={() => setTemplatePickerOpen(false)}
+        onSave={handleSaveTemplate}
+      />
     </div>
   );
 }
@@ -1968,7 +1910,7 @@ function EmailSequenceModal({
             <div className="flex flex-col items-center justify-center py-16 text-purple-400">
               <Loader2 className="animate-spin mb-3" size={28} />
               <p className="text-sm">
-                {isHtmlMode ? 'Re-applying HTML template for this lead...' : 'Writing a new version of this email...'}
+                Writing a new version of this email...
               </p>
             </div>
           ) : (
@@ -2036,7 +1978,7 @@ function EmailSequenceModal({
                   disabled={regenerating || approved || email.status === 'Sent'}
                   className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs rounded transition-colors flex items-center gap-1.5 border border-slate-700 disabled:opacity-50"
                 >
-                  <RefreshCw size={13} /> {isHtmlMode ? 'Re-apply template' : 'Regenerate'}
+                  <RefreshCw size={13} /> Regenerate
                 </button>
                 <div className="flex gap-2">
                   <button onClick={onClose} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs rounded transition-colors border border-slate-700">

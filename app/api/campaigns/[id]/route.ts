@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { ensureResendReplyTracking, getResendReplyTrackingStatus } from '@/lib/resend';
 import { getByokConfiguredFlags, isByokEnabled } from '@/lib/byok';
+import { EMAIL_TEMPLATES } from '@/lib/email/email-templates';
+import { sanitizeDesign } from '@/lib/email/html-templates';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -117,20 +119,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       if (updateData.htmlEmailTemplates === null) {
         updateData.htmlEmailTemplates = null;
       } else if (typeof updateData.htmlEmailTemplates !== 'object' || Array.isArray(updateData.htmlEmailTemplates)) {
-        return NextResponse.json({ error: 'htmlEmailTemplates must be an object keyed by sequence step.' }, { status: 400 });
+        return NextResponse.json({ error: 'htmlEmailTemplates must be a template config object.' }, { status: 400 });
       } else {
-        const cleaned: Record<string, { subject: string; html: string }> = {};
-        for (const [key, value] of Object.entries(updateData.htmlEmailTemplates as Record<string, any>)) {
-          if (!/^\d+$/.test(key)) continue;
-          if (!value || typeof value !== 'object') continue;
-          const subject = typeof value.subject === 'string' ? value.subject : '';
-          const html = typeof value.html === 'string' ? value.html : '';
-          if (Buffer.byteLength(html, 'utf8') > 500_000) {
-            return NextResponse.json({ error: `Email ${key} HTML exceeds the 500KB size limit.` }, { status: 400 });
-          }
-          cleaned[key] = { subject, html };
+        const raw = updateData.htmlEmailTemplates as Record<string, any>;
+        const templateId = typeof raw.templateId === 'string' ? raw.templateId.trim() : '';
+        if (!templateId) {
+          return NextResponse.json(
+            { error: 'Pick an email template before saving.' },
+            { status: 400 }
+          );
         }
-        updateData.htmlEmailTemplates = cleaned;
+        if (!EMAIL_TEMPLATES.some(t => t.id === templateId)) {
+          return NextResponse.json({ error: `Unknown email template "${templateId}".` }, { status: 400 });
+        }
+        updateData.htmlEmailTemplates = {
+          version: 2,
+          templateId,
+          design: sanitizeDesign(raw.design),
+        };
       }
     }
 
