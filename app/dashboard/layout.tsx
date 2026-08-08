@@ -5,9 +5,10 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { 
   LayoutDashboard, Users, UserPlus, Send, MessageSquare, 
-  PhoneCall, BarChart3, Settings, LogOut, Search, Bell,
+  PhoneCall, BarChart3, Settings, LogOut, Search,
   BookOpen, KanbanSquare, Calendar, CreditCard
 } from "lucide-react";
+import NotificationBell from "@/components/notification-bell";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
@@ -118,10 +119,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             />
           </div>
           <div className="flex items-center space-x-6">
-            <button suppressHydrationWarning className="relative text-slate-400 hover:text-white transition">
-              <Bell size={20} />
-              <span className="absolute top-0 right-0 w-2 h-2 bg-blue-500 rounded-full"></span>
-            </button>
+            <NotificationBell />
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 p-[2px]">
                 <div className="w-full h-full bg-slate-900 rounded-full flex items-center justify-center font-bold text-sm">

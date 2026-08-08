@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { fillDraftsForDisplay } from '@/lib/email/fill-drafts';
 
 export async function GET(req: Request) {
   const user = await getCurrentUser();
@@ -63,7 +64,12 @@ export async function GET(req: Request) {
       );
     }
 
-    return NextResponse.json({ pendingEmails: filtered });
+    // Safety net: drafts written before the merge-tag guard existed could still
+    // hold raw {{painPoints}} / [Your Name] tokens. Reviewers must always see
+    // the final email, never a template.
+    const finalized = await fillDraftsForDisplay(prisma, filtered);
+
+    return NextResponse.json({ pendingEmails: finalized });
   } catch (error: any) {
     console.error('Fetch email sequences error:', error);
     return NextResponse.json({

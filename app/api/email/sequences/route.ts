@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { fillDraftsForDisplay } from '@/lib/email/fill-drafts';
 
 export async function GET(req: Request) {
   const user = await getCurrentUser();
@@ -15,5 +16,5 @@ export async function GET(req: Request) {
     orderBy: { createdAt: 'desc' }
   });
 
-  return NextResponse.json({ sequences });
+  return NextResponse.json({ sequences: await fillDraftsForDisplay(prisma, sequences) });
 }

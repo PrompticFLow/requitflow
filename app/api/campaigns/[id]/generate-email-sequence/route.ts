@@ -216,49 +216,49 @@ Do not invent facts, proof, pricing, guarantees, or results.
 If a detail is missing, use safe fallback language. Do not refuse to generate the email.
 
 Campaign Answers:
-* Goal: \${intel.campaignGoal}
-* Type: \${intel.campaignType}
-* Target audience: \${intel.targetAudience}
-* Industry: \${intel.targetIndustry}
-* Company type: \${intel.targetCompanyType}
-* Roles: \${intel.targetRoles}
-* Market: \${intel.targetMarket}
-* Offer: \${intel.offer}
-* Main benefit: \${intel.mainBenefit}
-* Problem solved: \${intel.problemSolved}
-* Unique mechanism: \${intel.uniqueMechanism}
-* Proof: \${intel.proof}
-* Pain points: \${intel.painPoints}
-* Desired outcome: \${intel.desiredOutcome}
-* Objections: \${intel.objections}
-* Avoid saying: \${intel.avoidSaying}
-* Tone: \${intel.emailTone}
-* Length: \${intel.emailLength}
-* CTA strategy: \${intel.bookingLinkStrategy}
+* Goal: ${intel.campaignGoal}
+* Type: ${intel.campaignType}
+* Target audience: ${intel.targetAudience}
+* Industry: ${intel.targetIndustry}
+* Company type: ${intel.targetCompanyType}
+* Roles: ${intel.targetRoles}
+* Market: ${intel.targetMarket}
+* Offer: ${intel.offer}
+* Main benefit: ${intel.mainBenefit}
+* Problem solved: ${intel.problemSolved}
+* Unique mechanism: ${intel.uniqueMechanism}
+* Proof: ${intel.proof}
+* Pain points: ${intel.painPoints}
+* Desired outcome: ${intel.desiredOutcome}
+* Objections: ${intel.objections}
+* Avoid saying: ${intel.avoidSaying}
+* Tone: ${intel.emailTone}
+* Length: ${intel.emailLength}
+* CTA strategy: ${intel.bookingLinkStrategy}
 
 Knowledge Base:
-\${intel.knowledgeBaseContext}
+${intel.knowledgeBaseContext}
 
 AI Campaign Analysis (Use these strategies):
-* Category: \${aiAnalysis?.campaignCategory || 'Unknown'}
-* Pain Points: \${aiAnalysis?.painPoints?.join(', ') || 'None'}
-* Desired Outcomes: \${aiAnalysis?.desiredOutcomes?.join(', ') || 'None'}
-* Objections: \${aiAnalysis?.likelyObjections?.join(', ') || 'None'}
-* Recommended Tone: \${aiAnalysis?.recommendedTone || intel.emailTone}
-* CTA Strategy: \${aiAnalysis?.ctaStrategy || intel.bookingLinkStrategy}
-* Discovery Questions: \${aiAnalysis?.generatedQuestions?.join(' | ') || 'None'}
+* Category: ${aiAnalysis?.campaignCategory || 'Unknown'}
+* Pain Points: ${aiAnalysis?.painPoints?.join(', ') || 'None'}
+* Desired Outcomes: ${aiAnalysis?.desiredOutcomes?.join(', ') || 'None'}
+* Objections: ${aiAnalysis?.likelyObjections?.join(', ') || 'None'}
+* Recommended Tone: ${aiAnalysis?.recommendedTone || intel.emailTone}
+* CTA Strategy: ${aiAnalysis?.ctaStrategy || intel.bookingLinkStrategy}
+* Discovery Questions: ${aiAnalysis?.generatedQuestions?.join(' | ') || 'None'}
 
 Lead Personalization:
-* Greeting: \${intel.greeting}
-* First name: \${intel.firstName}
-* Full name: \${intel.fullName}
-* Company/business: \${intel.safeCompanyMention}
-* Job title: \${intel.jobTitle}
-* Industry: \${intel.industry}
-* Location: \${intel.location}
-* Website: \${intel.website}
-* LinkedIn: \${intel.linkedinUrl}
-* Company fallback: \${intel.companyFallback}
+* Greeting: ${intel.greeting}
+* First name: ${intel.firstName}
+* Full name: ${intel.fullName}
+* Company/business: ${intel.safeCompanyMention}
+* Job title: ${intel.jobTitle}
+* Industry: ${intel.industry}
+* Location: ${intel.location}
+* Website: ${intel.website}
+* LinkedIn: ${intel.linkedinUrl}
+* Company fallback: ${intel.companyFallback}
 
 Instructions:
 * Start every email with a personalized greeting.
@@ -436,7 +436,7 @@ If the model cannot generate, return: {"emails": []}`;
               aiOriginalSubject: seq.subject,
               aiOriginalBody: seq.body,
               aiGenerationReason: kbResult.hasKnowledge
-                ? `Generated using Knowledge Base (\${kbResult.fileCount} file\${kbResult.fileCount > 1 ? 's' : ''})`
+                ? `Generated using Knowledge Base (${kbResult.fileCount} file${kbResult.fileCount > 1 ? 's' : ''})`
                 : 'Generated using campaign fields (no Knowledge Base)',
               personalizationScore,
               spamRisk: seq.spamrisk ?? seq.spam_risk ?? seq.spamRisk ?? calculatedSpamRisk,

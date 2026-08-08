@@ -123,6 +123,7 @@ model Lead {
   leadType         String?
   validationStatus String?
   rawLeadId        String?
+  externalId       String?
   activityLogs     ActivityLog[]
   bookedCalls      BookedCall[]
   campaignLeads    CampaignLead[]
@@ -135,6 +136,9 @@ model Lead {
   user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   replies          Reply[]
   smsSequences     SmsSequence[]
+
+  @@index([userId, externalId])
+  @@index([userId, linkedinUrl])
 }
 
 model RawLead {

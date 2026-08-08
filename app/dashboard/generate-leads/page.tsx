@@ -3,6 +3,7 @@ import { useState } from "react";
 import {
   Search, Loader2, Download, Plus, X, Building2, Mail,
   Linkedin, Phone, Globe, BadgeCheck, HelpCircle, Users2, MapPin,
+  ChevronLeft, ChevronRight, Sparkles, CheckCircle2,
 } from "lucide-react";
 import { AiAgentWorking } from "@/components/ui/ai-agent-working";
 
@@ -39,6 +40,8 @@ const INDUSTRY_OPTIONS = [
   "oil & energy", "pharmaceuticals", "nonprofit organization management",
 ];
 
+const PER_PAGE_OPTIONS = [10, 25, 50, 100];
+
 interface Lead {
   id: string;
   businessName: string;
@@ -55,6 +58,16 @@ interface Lead {
   leadScore: number;
   leadTier: string;
   aiInsight: string | null;
+  isNew?: boolean;
+}
+
+interface Pagination {
+  page: number;
+  perPage: number;
+  total: number;
+  totalPages: number;
+  scrollToken: string | null;
+  hasMore: boolean;
 }
 
 function EmailBadge({ status }: { status: string | null }) {
@@ -89,7 +102,16 @@ export default function GenerateLeadsPage() {
   const [country, setCountry] = useState("United States");
   const [companySizes, setCompanySizes] = useState<string[]>([]);
   const [roles, setRoles] = useState<Role[]>(["hr_talent", "founders_execs"]);
-  const [maxResults, setMaxResults] = useState(25);
+  const [perPage, setPerPage] = useState(25);
+
+  // results meta
+  const [pagination, setPagination] = useState<Pagination | null>(null);
+  const [appliedTitles, setAppliedTitles] = useState<string[]>([]);
+  const [newCount, setNewCount] = useState(0);
+  const [duplicateCount, setDuplicateCount] = useState(0);
+  // PDL paging is a forward-only cursor, so we remember the token that opens
+  // each page — index 0 is page 1 (no token), index 1 is page 2, and so on.
+  const [pageTokens, setPageTokens] = useState<(string | null)[]>([null]);
 
   // selection + campaign
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
@@ -104,12 +126,15 @@ export default function GenerateLeadsPage() {
   const toggleRole = (v: Role) =>
     setRoles((prev) => (prev.includes(v) ? prev.filter((r) => r !== v) : [...prev, v]));
 
-  const handleGenerate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const runSearch = async (page: number, token: string | null, tokens: (string | null)[]) => {
     setLoading(true);
     setError("");
     setMessage("");
-    setProgress("AI Agent is searching for matching companies and decision-makers…");
+    setProgress(
+      page > 1
+        ? `Loading page ${page} of matching decision-makers…`
+        : "AI Agent is searching for matching companies and decision-makers…"
+    );
     setSelectedLeads([]);
     setLeads([]);
 
@@ -117,7 +142,10 @@ export default function GenerateLeadsPage() {
       const res = await fetch("/api/leads/find", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ industry, keywords, location, country, companySizes, roles, maxResults }),
+        body: JSON.stringify({
+          industry, keywords, location, country, companySizes, roles,
+          size: perPage, page, scrollToken: token,
+        }),
       });
       const data = await res.json();
 
@@ -130,6 +158,16 @@ export default function GenerateLeadsPage() {
       }
 
       setLeads(data.leads || []);
+      setPagination(data.pagination || null);
+      setAppliedTitles(data.appliedTitles || []);
+      setNewCount(data.newCount || 0);
+      setDuplicateCount(data.duplicateCount || 0);
+
+      // Remember the cursor that opens the *next* page.
+      const nextTokens = [...tokens];
+      nextTokens[page] = data.pagination?.scrollToken ?? null;
+      setPageTokens(nextTokens);
+
       if (!data.leads || data.leads.length === 0) {
         setMessage(data.message || "No matching companies were found for these criteria.");
       } else if (data.notice) {
@@ -141,6 +179,21 @@ export default function GenerateLeadsPage() {
       setLoading(false);
       setProgress("");
     }
+  };
+
+  const handleGenerate = (e: React.FormEvent) => {
+    e.preventDefault();
+    // New criteria invalidate every cursor we collected.
+    setPageTokens([null]);
+    runSearch(1, null, [null]);
+  };
+
+  const goToPage = (page: number) => {
+    if (loading || !pagination || page < 1) return;
+    const token = page === 1 ? null : pageTokens[page - 1];
+    if (page > 1 && !token) return; // no cursor for that page yet
+    runSearch(page, token, pageTokens);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const allSelected = leads.length > 0 && selectedLeads.length === leads.length;
@@ -239,7 +292,10 @@ export default function GenerateLeadsPage() {
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-300">Title Keywords <span className="text-slate-500">(optional)</span></label>
               <input type="text" value={keywords} onChange={(e) => setKeywords(e.target.value)}
-                placeholder="e.g. recruiting, talent" className={inputCls} />
+                placeholder="e.g. talent, recruiting" className={inputCls} />
+              <p className="text-[11px] text-slate-500">
+                Partial match — “talent” finds “Head of Talent Acquisition”. Comma-separate for several.
+              </p>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-300">State / Region</label>
@@ -285,14 +341,18 @@ export default function GenerateLeadsPage() {
                   </button>
                 ))}
               </div>
+              <p className="text-[11px] text-slate-500 pt-1">
+                Title keywords and roles are combined — a lead must match both.
+              </p>
             </div>
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
             <div className="space-y-2 w-full sm:w-48">
-              <label className="text-sm font-medium text-slate-300">Max Results</label>
-              <input type="number" min={1} max={100} value={maxResults}
-                onChange={(e) => setMaxResults(parseInt(e.target.value) || 25)} className={inputCls} />
+              <label className="text-sm font-medium text-slate-300">Results per page</label>
+              <select value={perPage} onChange={(e) => setPerPage(parseInt(e.target.value) || 25)} className={inputCls}>
+                {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
             </div>
             <button type="submit" disabled={loading}
               className="bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-medium transition-all shadow-lg shadow-violet-500/25 flex items-center justify-center gap-2">
@@ -305,6 +365,15 @@ export default function GenerateLeadsPage() {
         {loading && (
           <div className="mt-8 p-6 bg-slate-900/50 rounded-xl border border-violet-500/20 flex items-center justify-center">
             <AiAgentWorking text={progress} />
+          </div>
+        )}
+
+        {!loading && appliedTitles.length > 0 && (
+          <div className="mt-6 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            <span className="flex items-center gap-1.5 text-slate-500"><Sparkles size={12} /> Matching titles containing:</span>
+            {appliedTitles.map((t) => (
+              <span key={t} className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300">{t}</span>
+            ))}
           </div>
         )}
 
@@ -321,9 +390,16 @@ export default function GenerateLeadsPage() {
             <div className="flex items-center gap-3">
               <input type="checkbox" className="rounded border-slate-600 bg-slate-800"
                 checked={allSelected} onChange={handleSelectAll} />
-              <h3 className="text-xl font-semibold text-white">
-                {leads.length} Leads <span className="text-slate-500 text-sm font-normal">({selectedLeads.length} selected)</span>
-              </h3>
+              <div>
+                <h3 className="text-xl font-semibold text-white">
+                  {leads.length} Leads <span className="text-slate-500 text-sm font-normal">({selectedLeads.length} selected)</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {newCount} new saved
+                  {duplicateCount > 0 && ` · ${duplicateCount} already in your database (not saved again)`}
+                  {pagination && pagination.total > 0 && ` · ${pagination.total.toLocaleString()} total matches`}
+                </p>
+              </div>
             </div>
             <div className="flex gap-3">
               <button onClick={handleExportCSV}
@@ -354,6 +430,12 @@ export default function GenerateLeadsPage() {
                         <div className="flex items-center gap-2">
                           <Building2 size={16} className="text-slate-400 shrink-0" />
                           <h4 className="font-semibold text-white truncate">{lead.businessName}</h4>
+                          {lead.isNew === false && (
+                            <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-slate-700/50 text-slate-300 border border-slate-600"
+                              title="Already in your database — not saved again">
+                              <CheckCircle2 size={10} /> Saved
+                            </span>
+                          )}
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
                           {lead.industry && <span>{lead.industry}</span>}
@@ -420,6 +502,28 @@ export default function GenerateLeadsPage() {
               );
             })}
           </div>
+
+          {pagination && (
+            <div className="px-6 py-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">
+                Page {pagination.page}
+                {pagination.totalPages > 0 && ` of ${pagination.totalPages.toLocaleString()}`}
+                {pagination.total > 0 && ` · ${pagination.total.toLocaleString()} matches`}
+              </p>
+              <div className="flex items-center gap-2">
+                <button onClick={() => goToPage(pagination.page - 1)}
+                  disabled={loading || pagination.page <= 1}
+                  className="flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-white text-sm transition-colors">
+                  <ChevronLeft size={16} /> Previous
+                </button>
+                <button onClick={() => goToPage(pagination.page + 1)}
+                  disabled={loading || !pagination.hasMore}
+                  className="flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-white text-sm transition-colors">
+                  Next <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

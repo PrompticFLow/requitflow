@@ -7,10 +7,19 @@
  *
  * Plan notes (verified against the live API):
  *  - Person Search returns real name, job title, LinkedIn, and company details.
+ *  - `job_title` is indexed as a keyword, NOT as analyzed text: `match` on it
+ *    behaves like an exact match, so "talent" only matched people whose title is
+ *    literally "talent" (3.6k records) instead of "…talent acquisition…" (800k).
+ *    Title keywords therefore go through `wildcard: *keyword*`.
+ *  - `query_string` clauses are rejected by PDL ("Query clause [query] not
+ *    allowed"), so multi-keyword search is a bool/should of wildcards.
+ *  - Paging uses `scroll_token` (the legacy `from` offset is deprecated and caps
+ *    out at 9999). Tokens are forward-only, so the caller keeps them per page.
  *  - PII fields (work_email, emails, mobile_phone) come back as booleans when the
  *    plan lacks PII entitlement. We detect that and fall back to a best-guess
  *    work email derived from the person's name + company domain.
  *  - PDL company data has no phone field, so company phone is not available.
+ *  - PDL rate-limits aggressively (429); requests retry with backoff.
  *
  * Docs: https://docs.peopledatalabs.com/docs/person-search-api
  */
@@ -21,12 +30,15 @@ export type DecisionMakerRole = 'hr_talent' | 'founders_execs' | 'sales_marketin
 
 export interface PdlSearchParams {
   industry?: string;        // must be a PDL taxonomy value, e.g. "computer software"
-  keywords?: string;        // matched against job title
+  keywords?: string;        // comma-separated title keywords, matched as *keyword*
   location?: string;        // state / region, e.g. "Texas"
   country?: string;         // e.g. "United States"
   companySizes?: string[];  // PDL buckets, e.g. ["1-10","11-50"]
   roles?: DecisionMakerRole[];
-  maxResults?: number;
+  /** Page size (1–100). */
+  size?: number;
+  /** Forward-only cursor returned by the previous page. */
+  scrollToken?: string | null;
 }
 
 export interface LeadRecord {
@@ -54,6 +66,12 @@ export interface LeadRecord {
 
 export interface SearchResult {
   leads: LeadRecord[];
+  /** Total records matching the query (not just this page). */
+  total: number;
+  /** Cursor for the next page; null when there are no further pages. */
+  scrollToken: string | null;
+  /** The title wildcards actually sent to PDL — surfaced so the UI can show them. */
+  appliedTitles: string[];
   /** true when the plan returned at least one real (non-masked) email. */
   verifiedEmailsAvailable: boolean;
   notice?: string;
@@ -85,7 +103,16 @@ export const PDL_INDUSTRIES = [
 /** PDL indexes these values lowercased. */
 const lc = (s?: string | null) => (s ? String(s).trim().toLowerCase() : undefined);
 
-function buildQuery(params: PdlSearchParams) {
+/** Title keywords are comma-separated and matched as "contains". */
+export function parseTitleKeywords(keywords?: string | null): string[] {
+  return (keywords || '')
+    .split(',')
+    .map((k) => k.trim().toLowerCase())
+    // A bare "*" would match every title and blow up the result set.
+    .filter((k) => k.length > 0 && k.replace(/\*/g, '').length > 0);
+}
+
+function buildQuery(params: PdlSearchParams): { query: object; appliedTitles: string[] } {
   const must: object[] = [];
 
   const region = lc(params.location);
@@ -101,9 +128,18 @@ function buildQuery(params: PdlSearchParams) {
     must.push({ terms: { job_company_size: params.companySizes } });
   }
 
-  // Free-text keywords are matched against the job title (an analyzed field).
-  const keywords = lc(params.keywords);
-  if (keywords) must.push({ match: { job_title: keywords } });
+  // job_title is a keyword field, so "talent" has to be searched as *talent*.
+  // Several keywords are ORed, letting "talent, recruiter" widen the net.
+  const titles = parseTitleKeywords(params.keywords);
+  if (titles.length > 0) {
+    must.push({
+      bool: {
+        should: titles.map((t) => ({
+          wildcard: { job_title: t.includes('*') ? t : `*${t}*` },
+        })),
+      },
+    });
+  }
 
   const roles = params.roles && params.roles.length > 0
     ? params.roles
@@ -116,7 +152,7 @@ function buildQuery(params: PdlSearchParams) {
     must.push({ bool: { should: roleClauses } });
   }
 
-  return { bool: { must } };
+  return { query: { bool: { must } }, appliedTitles: titles };
 }
 
 /** PDL masks PII as booleans when the plan lacks entitlement — only strings are real. */
@@ -145,6 +181,25 @@ function bestGuessEmail(firstName: string | null, lastName: string | null, websi
   return `${f}.${l}@${domain}`;
 }
 
+/**
+ * PDL also returns a typed `emails` array. Only an address on the *current*
+ * employer's domain is usable — the array also carries previous-employer
+ * addresses (e.g. a Brundage Management contact still listing @farmers.com),
+ * and emailing those reaches the wrong company.
+ */
+function professionalEmailFrom(p: any, website: string | null): string | null {
+  if (!Array.isArray(p.emails)) return null;
+  const domain = domainFrom(website);
+  if (!domain) return null;
+
+  const onDomain = p.emails
+    .map((e: any) => (typeof e === 'string' ? { address: e, type: null } : e))
+    .filter((e: any) => realString(e?.address))
+    .find((e: any) => realString(e.address)!.toLowerCase().endsWith(`@${domain}`));
+
+  return onDomain ? realString(onDomain.address) : null;
+}
+
 function titleCase(s: string | null): string | null {
   if (!s) return null;
   return s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
@@ -161,7 +216,10 @@ function normalizePerson(p: any): LeadRecord {
   const website = realString(p.job_company_website);
 
   // work_email is a real string only when the plan includes PII.
-  const realEmail = realString(p.work_email) || realString(p.recommended_work_email);
+  const realEmail =
+    realString(p.work_email) ||
+    realString(p.recommended_work_email) ||
+    professionalEmailFrom(p, website);
 
   let email: string | null = null;
   let emailStatus: LeadRecord['emailStatus'] = 'unavailable';
@@ -201,33 +259,66 @@ function normalizePerson(p: any): LeadRecord {
   };
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** PDL throttles hard on burst traffic; a couple of backed-off retries clears it. */
+async function postWithRetry(apiKey: string, body: object, attempts = 3): Promise<{ res: Response; data: any }> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const res = await fetch(`${PDL_BASE_URL}/person/search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': apiKey,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const text = await res.text();
+    let data: any;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      lastError = new Error(`People Data Labs returned a non-JSON response (${res.status}).`);
+      data = null;
+    }
+
+    if (res.status === 429 && attempt < attempts - 1) {
+      await sleep(1500 * (attempt + 1));
+      continue;
+    }
+    if (data === null && attempt < attempts - 1) {
+      await sleep(500);
+      continue;
+    }
+    if (data !== null) return { res, data };
+  }
+
+  throw lastError || new Error('People Data Labs request failed.');
+}
+
 /**
  * Search PDL for decision-makers matching the criteria.
- * Returns an empty list (not an error) when PDL finds no matches.
+ * Returns an empty page (not an error) when PDL finds no matches, so the caller
+ * can keep paging without special-casing the end of the result set.
  */
 export async function searchLeads(apiKey: string, params: PdlSearchParams): Promise<SearchResult> {
-  const size = Math.min(Math.max(params.maxResults ?? 25, 1), 100);
+  const size = Math.min(Math.max(params.size ?? 25, 1), 100);
+  const { query, appliedTitles } = buildQuery(params);
 
-  const res = await fetch(`${PDL_BASE_URL}/person/search`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Api-Key': apiKey,
-    },
-    body: JSON.stringify({ query: buildQuery(params), size }),
-  });
+  const body: Record<string, any> = { query, size };
+  if (params.scrollToken) body.scroll_token = params.scrollToken;
 
-  const text = await res.text();
-  let data: any;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`People Data Labs returned a non-JSON response (${res.status}).`);
-  }
+  const { res, data } = await postWithRetry(apiKey, body);
 
   // PDL returns 404 when nothing matches — that's an empty result, not a failure.
   if (res.status === 404) {
-    return { leads: [], verifiedEmailsAvailable: false };
+    return { leads: [], total: 0, scrollToken: null, appliedTitles, verifiedEmailsAvailable: false };
+  }
+
+  if (res.status === 429) {
+    throw new Error('People Data Labs rate limit reached. Wait a moment and try again.');
   }
 
   if (!res.ok) {
@@ -243,5 +334,13 @@ export async function searchLeads(apiKey: string, params: PdlSearchParams): Prom
     ? 'Your People Data Labs plan does not include email addresses, so work emails shown are best-guess patterns (first.last@company-domain). Upgrading to a PDL plan with PII access will return verified emails automatically.'
     : undefined;
 
-  return { leads, verifiedEmailsAvailable, notice };
+  return {
+    leads,
+    total: typeof data.total === 'number' ? data.total : leads.length,
+    // PDL drops scroll_token once the result set is exhausted.
+    scrollToken: realString(data.scroll_token),
+    appliedTitles,
+    verifiedEmailsAvailable,
+    notice,
+  };
 }
