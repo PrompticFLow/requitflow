@@ -12,7 +12,7 @@ export default function CreateCampaignModal({
 }: {
   isOpen: boolean,
   onClose: () => void,
-  onSuccess: () => void,
+  onSuccess: (campaign?: any) => void,
   initialData?: any,
   editingId?: string | null
 }) {
@@ -52,7 +52,7 @@ export default function CreateCampaignModal({
 
       const data = await res.json();
       if (res.ok) {
-        onSuccess();
+        onSuccess(data.campaign);
       } else {
         alert(data.error || "Failed to save campaign.");
       }
@@ -64,7 +64,7 @@ export default function CreateCampaignModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
       <div className="glass bg-slate-900 border border-slate-700/50 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-gradient-to-r from-slate-900 to-slate-800 rounded-t-2xl">
           <div>

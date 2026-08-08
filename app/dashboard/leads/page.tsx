@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from 'next/link';
 import { Search, Filter, Download, Plus, Trash2, Loader2, Users, X, ChevronDown, ChevronLeft, ChevronRight, ShieldCheck, ShieldQuestion, MailX, Briefcase, Pencil } from "lucide-react";
+import CreateCampaignModal from "../campaigns/CreateCampaignModal";
 
 const EMAIL_STATUS_STYLES: Record<string, string> = {
   Valid: 'bg-green-500/20 text-green-400 border-green-500/30',
@@ -104,6 +105,7 @@ export default function LeadDatabasePage() {
 
   // New states for campaigns
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
+  const [isCreateCampaignOpen, setIsCreateCampaignOpen] = useState(false);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
   const [addingToCampaign, setAddingToCampaign] = useState(false);
@@ -978,16 +980,26 @@ export default function LeadDatabasePage() {
               })()}
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-1">Select Campaign</label>
-                <select
-                  value={selectedCampaignId}
-                  onChange={(e) => setSelectedCampaignId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition-colors"
-                >
-                  <option value="">-- Choose a Campaign --</option>
-                  {campaigns.filter(c => c.status !== 'Completed' && c.status !== 'Archived' && c.status !== 'Deleted').map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                <div className="flex gap-2 items-stretch">
+                  <select
+                    value={selectedCampaignId}
+                    onChange={(e) => setSelectedCampaignId(e.target.value)}
+                    className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition-colors"
+                  >
+                    <option value="">-- Choose a Campaign --</option>
+                    {campaigns.filter(c => c.status !== 'Completed' && c.status !== 'Archived' && c.status !== 'Deleted').map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setIsCreateCampaignOpen(true)}
+                    className="shrink-0 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
+                  >
+                    <Plus size={14} />
+                    Create Campaign
+                  </button>
+                </div>
               </div>
             </div>
             <div className="p-4 border-t border-slate-800 flex justify-end gap-3 bg-slate-800/20">
@@ -1009,6 +1021,16 @@ export default function LeadDatabasePage() {
           </div>
         </div>
       )}
+
+      <CreateCampaignModal
+        isOpen={isCreateCampaignOpen}
+        onClose={() => setIsCreateCampaignOpen(false)}
+        onSuccess={async (campaign) => {
+          setIsCreateCampaignOpen(false);
+          await fetchCampaigns();
+          if (campaign?.id) setSelectedCampaignId(campaign.id);
+        }}
+      />
 
       {/* Add Lead Modal */}
       {isAddLeadModalOpen && (

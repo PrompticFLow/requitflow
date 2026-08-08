@@ -1,9 +1,11 @@
 "use client";
 import { useState, useEffect } from "react";
 import { Plus, Play, Pause, Square, MoreVertical, Loader2, Trash2, Edit2, Target } from "lucide-react";
+import { useRouter } from "next/navigation";
 import CreateCampaignModal from "./CreateCampaignModal";
 
 export default function CampaignsPage() {
+  const router = useRouter();
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -11,10 +13,15 @@ export default function CampaignsPage() {
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
   const [initialModalData, setInitialModalData] = useState<any>(null);
 
-  const handleModalSuccess = () => {
+  const handleModalSuccess = (campaign?: any) => {
+    const wasEditing = !!editingCampaignId;
     setShowModal(false);
     setInitialModalData(null);
     setEditingCampaignId(null);
+    if (!wasEditing && campaign?.id) {
+      router.push(`/dashboard/campaigns/${campaign.id}`);
+      return;
+    }
     fetchCampaigns();
   };
 

@@ -6,6 +6,7 @@ import {
   ChevronLeft, ChevronRight, Sparkles, CheckCircle2,
 } from "lucide-react";
 import { AiAgentWorking } from "@/components/ui/ai-agent-working";
+import CreateCampaignModal from "../campaigns/CreateCampaignModal";
 
 type Role = "hr_talent" | "founders_execs" | "sales_marketing";
 
@@ -116,6 +117,7 @@ export default function GenerateLeadsPage() {
   // selection + campaign
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
+  const [isCreateCampaignOpen, setIsCreateCampaignOpen] = useState(false);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [adding, setAdding] = useState(false);
@@ -226,6 +228,10 @@ export default function GenerateLeadsPage() {
   const openCampaignModal = async () => {
     if (selectedLeads.length === 0) return alert("Select at least one lead to add to a campaign.");
     setShowModal(true);
+    await fetchCampaigns();
+  };
+
+  const fetchCampaigns = async () => {
     try {
       const res = await fetch("/api/campaigns");
       const data = await res.json();
@@ -536,13 +542,23 @@ export default function GenerateLeadsPage() {
             <h3 className="text-2xl font-bold text-white mb-2">Add to Campaign</h3>
             <p className="text-slate-400 mb-6">Enroll {selectedLeads.length} leads into a campaign.</p>
             <div className="space-y-4">
-              <select value={selectedCampaignId} onChange={(e) => setSelectedCampaignId(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-violet-500 outline-none">
-                <option value="">-- Select Campaign --</option>
-                {campaigns.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+              <div className="flex gap-2 items-stretch">
+                <select value={selectedCampaignId} onChange={(e) => setSelectedCampaignId(e.target.value)}
+                  className="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-violet-500 outline-none">
+                  <option value="">-- Select Campaign --</option>
+                  {campaigns.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setIsCreateCampaignOpen(true)}
+                  className="shrink-0 px-3 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
+                >
+                  <Plus size={14} />
+                  Create Campaign
+                </button>
+              </div>
               <button onClick={handleAddToCampaign} disabled={adding || !selectedCampaignId}
                 className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white px-4 py-3 rounded-lg font-medium transition-all shadow-lg shadow-violet-500/25 flex items-center justify-center gap-2">
                 {adding ? <Loader2 className="animate-spin" size={20} /> : <Plus size={20} />}
@@ -552,6 +568,16 @@ export default function GenerateLeadsPage() {
           </div>
         </div>
       )}
+
+      <CreateCampaignModal
+        isOpen={isCreateCampaignOpen}
+        onClose={() => setIsCreateCampaignOpen(false)}
+        onSuccess={async (campaign) => {
+          setIsCreateCampaignOpen(false);
+          await fetchCampaigns();
+          if (campaign?.id) setSelectedCampaignId(campaign.id);
+        }}
+      />
     </div>
   );
 }

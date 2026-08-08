@@ -8,6 +8,7 @@ import {
   Shield, MessageSquare
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Campaign = {
@@ -150,7 +151,7 @@ async function parseApiResponse(response: Response) {
 }
 
 export default function AIEmailAgentPage() {
-  const [activeTab, setActiveTab] = useState<"hub" | "pending">("hub");
+  const router = useRouter();
   const [authError, setAuthError] = useState(false);
 
   // — Campaign Hub state
@@ -269,10 +270,9 @@ export default function AIEmailAgentPage() {
   }, [emailFilter, emailCampaignFilter, emailStepFilter, emailSearch]);
 
   useEffect(() => {
-    if (activeTab === "hub") fetchCampaigns();
-    else fetchEmails();
+    fetchCampaigns();
     fetchProvider();
-  }, [activeTab, fetchCampaigns, fetchEmails, fetchProvider]);
+  }, [fetchCampaigns, fetchProvider]);
 
   const fetchWizardLeads = useCallback(async () => {
     setWizardLeadsLoading(true);
@@ -421,9 +421,13 @@ export default function AIEmailAgentPage() {
   };
 
   const handleWizardDone = () => {
+    const campaignId = wizardCampaignId;
     closeWizard();
-    setActiveTab("pending");
-    fetchEmails();
+    if (campaignId) {
+      router.push(`/dashboard/campaigns/${campaignId}`);
+    } else {
+      fetchCampaigns();
+    }
   };
 
   // ─── Campaign actions ─────────────────────────────────────────────────────
@@ -451,7 +455,7 @@ export default function AIEmailAgentPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        const msg = data.message || "Emails generated successfully! Switch to Pending Email Reviews to review them.";
+        const msg = data.message || "Emails generated successfully! Open the campaign to review them.";
         alert(msg);
         fetchCampaigns();
       } else {
@@ -640,10 +644,6 @@ export default function AIEmailAgentPage() {
     return true;
   });
 
-  const uniqueCampaigns = Array.from(new Set(pendingEmails.map(e => e.campaignId)))
-    .map(id => pendingEmails.find(e => e.campaignId === id)?.campaign).filter(Boolean);
-  const uniqueSteps = Array.from(new Set(pendingEmails.map(e => e.sequenceStep))).sort((a, b) => a - b);
-
   const validLeads = wizardLeads.filter(l => l.email && l.email.includes("@") && l.status !== "Unsubscribed");
   const invalidLeads = wizardLeads.filter(l => !l.email || !l.email.includes("@"));
   const unsubscribedLeads = wizardLeads.filter(l => l.status === "Unsubscribed");
@@ -679,33 +679,17 @@ export default function AIEmailAgentPage() {
           <p className="text-slate-400 max-w-2xl">Create campaigns, select leads, generate AI email drafts, review them, and launch safely. Nothing sends without your approval.</p>
         </div>
         <div className="flex gap-3 flex-wrap">
-          <button id="btn-view-campaigns" onClick={() => setActiveTab("hub")} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors border border-slate-700 text-sm">
+          <Link href="/dashboard/campaigns" id="btn-view-campaigns" className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors border border-slate-700 text-sm">
             View All Campaigns
-          </button>
+          </Link>
           <button id="btn-create-campaign" onClick={openWizard} className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-lg font-medium transition-all shadow-lg shadow-purple-500/25 text-sm">
             <Plus size={16} /> Create Campaign
           </button>
         </div>
       </div>
 
-      {/* ── Tabs ── */}
-      <div className="flex space-x-1 border-b border-slate-800">
-        {[["hub", "Campaign Hub"], ["pending", "Pending Email Reviews"]].map(([tab, label]) => (
-          <button key={tab} onClick={() => setActiveTab(tab as "hub" | "pending")}
-            className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${activeTab === tab ? "border-purple-500 text-purple-400" : "border-transparent text-slate-400 hover:text-slate-300"}`}>
-            {label}
-            {tab === "pending" && pendingEmails.filter(e => e.approvalStatus === "Pending").length > 0 && (
-              <span className="ml-2 bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded-full border border-amber-500/20">
-                {pendingEmails.filter(e => e.approvalStatus === "Pending").length}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
       {/* ══════════════════════ CAMPAIGN HUB ══════════════════════ */}
-      {activeTab === "hub" && (
-        <div className="space-y-4">
+      <div className="space-y-4">
           {/* Search + filter bar */}
           <div className="flex flex-col md:flex-row justify-between gap-3">
             <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 w-full md:w-72">
@@ -801,11 +785,11 @@ export default function AIEmailAgentPage() {
                               if (nextAction.action === "start") setStartConfirmId(camp.id);
                               else if (nextAction.action === "resume") handleResumeCampaign(camp.id);
                               else if (nextAction.action === "generate") setGenerateModalId(camp.id);
-                              else if (nextAction.action === "review") { setActiveTab("pending"); setEmailCampaignFilter(camp.id); }
+                              else if (nextAction.action === "review") router.push(`/dashboard/campaigns/${camp.id}`);
                               else if (nextAction.action === "edit") { setEditCampaign(camp); setEditModalOpen(true); }
                               else if (nextAction.action === "settings") { window.location.href = "/dashboard/settings"; }
                               else if (nextAction.action === "replies") { window.location.href = "/dashboard/replies"; }
-                              else if (nextAction.action === "addLeads") { setActiveTab("pending"); }
+                              else if (nextAction.action === "addLeads") router.push(`/dashboard/campaigns/${camp.id}`);
                             }}
                             className="text-xs text-purple-400 hover:text-purple-300 font-medium flex items-center gap-1 transition-colors">
                             <ArrowRight size={12} /> {nextAction.label}
@@ -830,7 +814,7 @@ export default function AIEmailAgentPage() {
                           className="p-1.5 bg-purple-500/10 text-purple-400 rounded-lg hover:bg-purple-500/20 border border-purple-500/20" title="Generate Emails">
                           <Sparkles size={15} />
                         </button>
-                        <button id={`btn-review-${camp.id}`} onClick={() => { setActiveTab("pending"); setEmailCampaignFilter(camp.id); }}
+                        <button id={`btn-review-${camp.id}`} onClick={() => router.push(`/dashboard/campaigns/${camp.id}`)}
                           className="p-1.5 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 border border-blue-500/20" title="Review Emails">
                           <Mail size={15} />
                         </button>
@@ -858,197 +842,6 @@ export default function AIEmailAgentPage() {
             </div>
           )}
         </div>
-      )}
-
-      {/* ══════════════════════ PENDING EMAIL REVIEWS ══════════════════════ */}
-      {activeTab === "pending" && (
-        <div className="space-y-4">
-          {/* Filters */}
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col md:flex-row gap-3">
-              <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 w-full md:w-72">
-                <Search size={15} className="text-slate-400 shrink-0" />
-                <input type="text" value={emailSearch} onChange={e => setEmailSearch(e.target.value)}
-                  placeholder="Search by lead, subject, campaign..." className="bg-transparent border-none outline-none ml-2 w-full text-sm text-white placeholder-slate-500" />
-              </div>
-              <div className="flex gap-2 flex-wrap items-center">
-                {["All", "Pending", "Approved", "Rejected", "Edited", "High Spam Risk", "Failed Generation"].map(f => (
-                  <button key={f} onClick={() => setEmailFilter(f)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${emailFilter === f ? "bg-purple-500/20 text-purple-400 border-purple-500/30" : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700"}`}>
-                    {f}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              <select value={emailCampaignFilter} onChange={e => setEmailCampaignFilter(e.target.value)}
-                className="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-1.5 outline-none">
-                <option value="All">All Campaigns</option>
-                {uniqueCampaigns.map((c: any) => c && <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <select value={emailStepFilter} onChange={e => setEmailStepFilter(e.target.value)}
-                className="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-1.5 outline-none">
-                <option value="All">All Steps</option>
-                {uniqueSteps.map(s => <option key={s} value={s.toString()}>Step {s}</option>)}
-              </select>
-              <button onClick={fetchEmails} className="px-3 py-1.5 bg-slate-800 text-slate-400 text-xs rounded-lg hover:bg-slate-700 border border-slate-700 flex items-center gap-1">
-                <RefreshCw size={12} /> Refresh
-              </button>
-            </div>
-          </div>
-
-          {/* Bulk action bar */}
-          <div className="flex items-center justify-between bg-slate-800/50 p-3 rounded-xl border border-slate-700">
-            <div className="flex items-center gap-3">
-              <input type="checkbox"
-                checked={selectedEmailIds.length === pendingEmails.length && pendingEmails.length > 0}
-                onChange={() => setSelectedEmailIds(selectedEmailIds.length === pendingEmails.length && pendingEmails.length > 0 ? [] : pendingEmails.map(e => e.id))}
-                className="w-4 h-4 rounded border-slate-600 cursor-pointer" />
-              <span className="text-sm text-slate-300">
-                {selectedEmailIds.length > 0 ? `${selectedEmailIds.length} selected` : "Select drafts"}
-              </span>
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              <button id="btn-bulk-approve"
-                onClick={() => selectedEmailIds.length ? setBulkModal({ open: true, action: "approve", count: selectedEmailIds.length }) : alert("Select drafts first.")}
-                disabled={selectedEmailIds.length === 0}
-                className="px-3 py-1.5 bg-green-500/10 text-green-400 text-xs font-medium rounded-lg hover:bg-green-500/20 disabled:opacity-40 disabled:cursor-not-allowed border border-green-500/20 flex items-center gap-1">
-                <Check size={13} /> Approve Selected
-              </button>
-              <button id="btn-bulk-reject"
-                onClick={() => selectedEmailIds.length ? setBulkModal({ open: true, action: "reject", count: selectedEmailIds.length }) : alert("Select drafts first.")}
-                disabled={selectedEmailIds.length === 0}
-                className="px-3 py-1.5 bg-red-500/10 text-red-400 text-xs font-medium rounded-lg hover:bg-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed border border-red-500/20 flex items-center gap-1">
-                <X size={13} /> Reject Selected
-              </button>
-              <button id="btn-bulk-regenerate"
-                onClick={() => selectedEmailIds.length ? setBulkModal({ open: true, action: "regenerate", count: selectedEmailIds.length }) : alert("Select drafts first.")}
-                disabled={selectedEmailIds.length === 0}
-                className="px-3 py-1.5 bg-purple-500/10 text-purple-400 text-xs font-medium rounded-lg hover:bg-purple-500/20 disabled:opacity-40 disabled:cursor-not-allowed border border-purple-500/20 flex items-center gap-1">
-                <RefreshCw size={13} /> Regenerate Selected
-              </button>
-              <button id="btn-clear-selection"
-                onClick={() => setSelectedEmailIds([])}
-                disabled={selectedEmailIds.length === 0}
-                className="px-3 py-1.5 bg-slate-700 text-slate-300 text-xs rounded-lg hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed">
-                Clear
-              </button>
-            </div>
-          </div>
-
-          {/* Email table */}
-          <div className="bg-slate-900/70 border border-slate-700/50 rounded-2xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left text-slate-300">
-                <thead className="bg-slate-900/80 text-slate-400 border-b border-slate-800 text-xs">
-                  <tr>
-                    <th className="px-4 py-3 w-10"></th>
-                    <th className="px-4 py-3 font-medium">Lead / Campaign</th>
-                    <th className="px-4 py-3 font-medium">Email Preview</th>
-                    <th className="px-4 py-3 font-medium">Status</th>
-                    <th className="px-4 py-3 font-medium">Scores</th>
-                    <th className="px-4 py-3 font-medium text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {fetchingEmails ? (
-                    [1, 2, 3].map(i => (
-                      <tr key={i} className="animate-pulse">
-                        {[1, 2, 3, 4, 5, 6].map(j => <td key={j} className="px-4 py-4"><div className="h-3 bg-slate-800 rounded w-full"></div></td>)}
-                      </tr>
-                    ))
-                  ) : pendingEmails.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-16 text-center">
-                        <div className="flex flex-col items-center">
-                          <div className="w-16 h-16 bg-slate-800/50 rounded-full flex items-center justify-center mb-4">
-                            <Mail size={28} className="text-slate-500" />
-                          </div>
-                          <h3 className="text-lg font-medium text-white mb-2">No email reviews yet</h3>
-                          <p className="text-slate-400 max-w-sm mb-5">Generate AI emails to review before sending.</p>
-                          <button onClick={() => setActiveTab("hub")} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-lg text-sm">
-                            Go to Campaign Hub
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    pendingEmails.map(email => {
-                      const isEdited = !!(email.editedSubject || email.editedBody);
-                      return (
-                        <tr key={email.id} className="hover:bg-slate-800/30 transition-colors">
-                          <td className="px-4 py-4">
-                            <input type="checkbox" checked={selectedEmailIds.includes(email.id)}
-                              onChange={() => setSelectedEmailIds(prev => prev.includes(email.id) ? prev.filter(i => i !== email.id) : [...prev, email.id])}
-                              className="w-4 h-4 rounded border-slate-600 cursor-pointer" />
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="font-medium text-white text-sm">{email.lead?.businessName || "Unknown"}</div>
-                            <div className="text-xs text-slate-500">{email.campaign?.name} · Step {email.sequenceStep}</div>
-                            {email.lead?.email && <div className="text-xs text-slate-600 mt-0.5">{email.lead.email}</div>}
-                          </td>
-                          <td className="px-4 py-4 max-w-xs">
-                            <div className="font-medium text-slate-200 text-sm mb-1 truncate">{email.subject}</div>
-                            <div className="text-xs text-slate-500 line-clamp-2">{email.previewText || email.body}</div>
-                            {isEdited && <span className="inline-block mt-1 text-xs text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">Edited</span>}
-                          </td>
-                          <td className="px-4 py-4">
-                            <ApprovalBadge status={email.approvalStatus} spamRisk={email.spamRisk} />
-                          </td>
-                          <td className="px-4 py-4">
-                            {email.personalizationScore != null && (
-                              <div className="text-xs text-slate-400">
-                                <span className={email.personalizationScore >= 70 ? "text-green-400" : email.personalizationScore >= 50 ? "text-amber-400" : "text-red-400"}>
-                                  {email.personalizationScore}%
-                                </span> personalized
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-4 text-right">
-                            <div className="flex justify-end gap-1.5">
-                              <button id={`btn-preview-${email.id}`} onClick={() => setPreviewEmail(email)}
-                                className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:bg-slate-700 border border-slate-700" title="Preview">
-                                <Eye size={14} />
-                              </button>
-                              <button id={`btn-edit-email-${email.id}`} onClick={() => {
-                                setEditSubject(email.editedSubject || email.subject);
-                                setEditBody(email.editedBody || email.body);
-                                setEditEmailModal({ open: true, email });
-                              }}
-                                className="p-1.5 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 border border-blue-500/20" title="Edit">
-                                <Edit2 size={14} />
-                              </button>
-                              <button id={`btn-approve-${email.id}`} onClick={() => handleApproveEmail(email.id)}
-                                className="p-1.5 bg-green-500/10 text-green-400 rounded-lg hover:bg-green-500/20 border border-green-500/20" title="Approve">
-                                <Check size={14} />
-                              </button>
-                              <button id={`btn-reject-${email.id}`} onClick={() => handleRejectEmail(email.id)}
-                                className="p-1.5 bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500/20 border border-red-500/20" title="Reject">
-                                <X size={14} />
-                              </button>
-                              <button id={`btn-regen-${email.id}`} onClick={() => setRegenModal({ open: true, email })}
-                                className="p-1.5 bg-purple-500/10 text-purple-400 rounded-lg hover:bg-purple-500/20 border border-purple-500/20" title="Regenerate">
-                                <RefreshCw size={14} />
-                              </button>
-                              {email.status !== "Sent" && (
-                                <button id={`btn-delete-email-${email.id}`} onClick={() => handleDeleteEmail(email.id)}
-                                  disabled={deletingEmailId === email.id}
-                                  className="p-1.5 bg-red-500/10 text-red-400 rounded-lg hover:bg-red-600 hover:text-white border border-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors" title="Delete">
-                                  {deletingEmailId === email.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ══════════════════════ MODALS ══════════════════════ */}
 
@@ -1376,12 +1169,12 @@ export default function AIEmailAgentPage() {
                       {generationProgress.done > 0 && (
                         <div className="text-sm text-slate-400">
                           <p>✓ <span className="text-green-400">{generationProgress.done * 5}</span> drafts created for <span className="text-green-400">{generationProgress.done}</span> leads.</p>
-                          <p className="mt-1">Switch to <strong>Pending Email Reviews</strong> to review and approve Email 1 before starting the campaign.</p>
+                          <p className="mt-1">Open the campaign details to review and approve Email 1 before starting the campaign.</p>
                         </div>
                       )}
                       <button onClick={handleWizardDone}
                         className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2">
-                        <ArrowRight size={16} /> Go to Pending Email Reviews
+                        <ArrowRight size={16} /> Go to Campaign Details
                       </button>
                     </div>
                   ) : (
@@ -1601,7 +1394,10 @@ export default function AIEmailAgentPage() {
                     <button onClick={() => {
                       if (item.key === "senderEmail") window.location.href = "/dashboard/settings";
                       else if (item.key === "email1Generated" && readinessModal.campaignId) setGenerateModalId(readinessModal.campaignId);
-                      else if (item.key === "email1Approved") { setActiveTab("pending"); setReadinessModal(s => ({ ...s, open: false })); }
+                      else if (item.key === "email1Approved" && readinessModal.campaignId) {
+                        router.push(`/dashboard/campaigns/${readinessModal.campaignId}`);
+                        setReadinessModal(s => ({ ...s, open: false }));
+                      }
                       else if (["bookingLink", "unsubscribeLine"].includes(item.key)) {
                         const camp = campaigns.find(c => c.id === readinessModal.campaignId);
                         if (camp) { setEditCampaign(camp); setEditModalOpen(true); }
