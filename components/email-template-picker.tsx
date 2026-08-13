@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Check, Loader2, Palette, Type, MousePointerClick, Building2, Eye } from "lucide-react";
 import {
@@ -52,15 +52,19 @@ export default function EmailTemplatePicker({
     resolveDesign(initialTemplateId, initialDesign)
   );
   const [category, setCategory] = useState("All");
-
-  // Re-seed whenever the modal is (re)opened so it always reflects saved state.
-  useEffect(() => {
-    if (!open) return;
-    const id = initialTemplateId || EMAIL_TEMPLATES[0].id;
-    setTemplateId(id);
-    setDesign(resolveDesign(id, initialDesign));
-    setCategory("All");
-  }, [open, initialTemplateId, initialDesign]);
+  // Seed during render when the modal opens so the iframe mounts once with the
+  // right HTML. A post-paint useEffect reset remounts/aborts srcdoc and leaves
+  // the first open blank (switching templates then does nothing until reopen).
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      const id = initialTemplateId || EMAIL_TEMPLATES[0].id;
+      setTemplateId(id);
+      setDesign(resolveDesign(id, initialDesign));
+      setCategory("All");
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -153,12 +157,7 @@ export default function EmailTemplatePicker({
               Live preview — sample copy, real leads get their own AI-written email
             </div>
             <div className="flex-1 overflow-hidden p-3">
-              <iframe
-                title="Email template preview"
-                srcDoc={previewHtml}
-                className="w-full h-full rounded-lg bg-white border border-slate-800"
-                sandbox=""
-              />
+              <LiveEmailPreview html={previewHtml} />
             </div>
           </div>
 
@@ -289,6 +288,26 @@ export default function EmailTemplatePicker({
 
   if (typeof document === "undefined") return null;
   return createPortal(modal, document.body);
+}
+
+/** Write srcdoc on the DOM node so template switches always reload the preview. */
+function LiveEmailPreview({ html }: { html: string }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  useLayoutEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    iframe.srcdoc = html;
+  }, [html]);
+
+  return (
+    <iframe
+      ref={iframeRef}
+      title="Email template preview"
+      className="w-full h-full rounded-lg bg-white border border-slate-800"
+      sandbox="allow-same-origin"
+    />
+  );
 }
 
 // ─── Gallery card ───────────────────────────────────────────────────────────

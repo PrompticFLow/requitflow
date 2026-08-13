@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Search, Mail, Sparkles, Check, X, RefreshCw, Loader2, Plus, Play,
-  Pause, Trash2, Edit2, Target, Eye, FileText, Filter, ChevronRight,
+  Trash2, Edit2, Target, Eye, Filter, ChevronRight,
   ChevronLeft, AlertTriangle, Users, Zap, ArrowRight, Clock, BarChart2,
   CheckCircle2, XCircle, AlertCircle, Info, Send, BookOpen, Settings2,
   Shield, MessageSquare
@@ -497,17 +497,6 @@ export default function AIEmailAgentPage() {
     finally { setStarting(false); }
   };
 
-  const handlePauseCampaign = async (id: string) => {
-    try {
-      const res = await fetch(`/api/campaigns/${id}/pause`, { 
-        method: "POST",
-        credentials: "include" 
-      });
-      if (res.ok) fetchCampaigns();
-      else { const d = await res.json(); alert(d.error || "Failed to pause campaign."); }
-    } catch { alert("An error occurred."); }
-  };
-
   const handleResumeCampaign = (id: string) => setStartConfirmId(id);
 
   const handleSaveEditCampaign = async (e: React.FormEvent) => {
@@ -797,36 +786,7 @@ export default function AIEmailAgentPage() {
                         </div>
                       </div>
 
-                      {/* Action buttons */}
-                      <div className="flex items-center gap-1.5 flex-wrap lg:flex-nowrap shrink-0">
-                        {camp.status !== "Active" ? (
-                          <button id={`btn-start-${camp.id}`} onClick={() => setStartConfirmId(camp.id)}
-                            className="px-3 py-1.5 bg-green-500/10 text-green-400 text-xs font-medium rounded-lg hover:bg-green-500/20 border border-green-500/20 flex items-center gap-1">
-                            <Play size={13} /> Start
-                          </button>
-                        ) : (
-                          <button id={`btn-pause-${camp.id}`} onClick={() => handlePauseCampaign(camp.id)}
-                            className="px-3 py-1.5 bg-yellow-500/10 text-yellow-400 text-xs font-medium rounded-lg hover:bg-yellow-500/20 border border-yellow-500/20 flex items-center gap-1">
-                            <Pause size={13} /> Pause
-                          </button>
-                        )}
-                        <button id={`btn-generate-${camp.id}`} onClick={() => setGenerateModalId(camp.id)}
-                          className="p-1.5 bg-purple-500/10 text-purple-400 rounded-lg hover:bg-purple-500/20 border border-purple-500/20" title="Generate Emails">
-                          <Sparkles size={15} />
-                        </button>
-                        <button id={`btn-review-${camp.id}`} onClick={() => router.push(`/dashboard/campaigns/${camp.id}`)}
-                          className="p-1.5 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 border border-blue-500/20" title="Review Emails">
-                          <Mail size={15} />
-                        </button>
-                        <button id={`btn-edit-${camp.id}`} onClick={() => { setEditCampaign(camp); setEditModalOpen(true); }}
-                          className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:bg-slate-700 border border-slate-700" title="Edit Campaign">
-                          <Edit2 size={15} />
-                        </button>
-                        <Link href={`/dashboard/campaigns/${camp.id}`}>
-                          <span id={`btn-view-${camp.id}`} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:bg-slate-700 border border-slate-700 flex" title="View Sequence">
-                            <FileText size={15} />
-                          </span>
-                        </Link>
+                      <div className="flex items-center shrink-0">
                         <button id={`btn-delete-${camp.id}`} onClick={() => {
                           setDeleteModalId(camp.id);
                           setDeleteHasSent((camp._count?.emailSequences ?? 0) > 0);
