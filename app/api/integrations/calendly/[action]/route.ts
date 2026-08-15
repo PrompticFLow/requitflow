@@ -12,6 +12,7 @@ import {
   encodeCalendlyOAuthState,
   decodeCalendlyOAuthState,
   isSafeReturnTo,
+  getPublicAppOrigin,
   syncCalendlyBookingsForUser,
 } from '@/lib/calendly';
 
@@ -25,6 +26,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ action: 
     const oauthError = url.searchParams.get('error');
     const decoded = rawState ? decodeCalendlyOAuthState(rawState) : null;
     const userId = decoded?.userId;
+    const origin = getPublicAppOrigin(req);
     const returnTo = isSafeReturnTo(decoded?.returnTo) ? decoded!.returnTo! : '/dashboard/settings';
     const successRedirect = returnTo.includes('?')
       ? `${returnTo}&calendly=connected`
@@ -34,15 +36,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ action: 
       : '/dashboard/settings';
 
     if (oauthError) {
-      return NextResponse.redirect(new URL(`${errorRedirectBase}?error=calendly_${oauthError}`, req.url));
+      return NextResponse.redirect(new URL(`${errorRedirectBase}?error=calendly_${oauthError}`, origin));
     }
     if (!code || !userId) {
-      return NextResponse.redirect(new URL(`${errorRedirectBase}?error=calendly_missing_code`, req.url));
+      return NextResponse.redirect(new URL(`${errorRedirectBase}?error=calendly_missing_code`, origin));
     }
 
     try {
       if (!isCalendlyConfigured()) {
-        return NextResponse.redirect(new URL(`${errorRedirectBase}?error=calendly_not_configured`, req.url));
+        return NextResponse.redirect(new URL(`${errorRedirectBase}?error=calendly_not_configured`, origin));
       }
 
       const tokens = await exchangeCalendlyCode(code);
@@ -105,10 +107,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ action: 
         }
       }
 
-      return NextResponse.redirect(new URL(successRedirect, req.url));
+      return NextResponse.redirect(new URL(successRedirect, origin));
     } catch (err) {
       console.error('Calendly OAuth callback failed:', err);
-      return NextResponse.redirect(new URL(`${errorRedirectBase}?error=calendly_failed`, req.url));
+      return NextResponse.redirect(new URL(`${errorRedirectBase}?error=calendly_failed`, origin));
     }
   }
 

@@ -12,6 +12,51 @@ export function isCalendlyConfigured() {
   );
 }
 
+function originFromUrl(value: string | undefined): string | null {
+  if (!value?.trim()) return null;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function isLoopbackHost(host: string): boolean {
+  const hostname = host.replace(/^\[|\]$/g, '').split(':')[0];
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0';
+}
+
+/**
+ * Public site origin for post-OAuth redirects.
+ * Never use `req.url` alone behind Railway: the process binds to PORT (often 8080),
+ * so `new URL(path, req.url)` becomes `http://localhost:8080/...`.
+ */
+export function getPublicAppOrigin(req: Request): string {
+  const envOrigins = [
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.NEXTAUTH_URL,
+    process.env.CALENDLY_REDIRECT_URI,
+  ];
+  for (const value of envOrigins) {
+    const origin = originFromUrl(value);
+    if (!origin) continue;
+    if (!isLoopbackHost(new URL(origin).host) || process.env.NODE_ENV !== 'production') {
+      return origin;
+    }
+  }
+
+  const forwardedHost = req.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
+  const host = forwardedHost || req.headers.get('host') || '';
+  const proto =
+    req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() ||
+    (isLoopbackHost(host) ? 'http' : 'https');
+  if (host && !isLoopbackHost(host)) {
+    return `${proto}://${host}`;
+  }
+
+  return new URL(req.url).origin;
+}
+
 export function getCalendlyAuthorizeUrl(state: string) {
   const params = new URLSearchParams({
     client_id: process.env.CALENDLY_CLIENT_ID!,
