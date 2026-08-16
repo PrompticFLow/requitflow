@@ -189,3 +189,85 @@ export function applyHtmlTemplateForLead(
 export function isHtmlBody(body: string | null | undefined): boolean {
   return !!body && /<[a-z][\s\S]*>/i.test(body);
 }
+
+/** True when the body is already a complete HTML email (our templates start this way). */
+export function isFullHtmlDocument(body: string | null | undefined): boolean {
+  return !!body && /<!DOCTYPE\s+html|<html[\s>]/i.test(body);
+}
+
+export function stripHtmlToText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+type CampaignTemplateSource = {
+  emailBodyMode?: string | null;
+  htmlEmailTemplates?: unknown;
+  bookingLink?: string | null;
+  ctaLink?: string | null;
+};
+
+/**
+ * Wrap AI/plain copy in the campaign's selected HTML template.
+ * Already-complete HTML documents (and legacy per-step HTML) are left as-is
+ * so we never nest a template inside itself.
+ */
+export function wrapBodyIfHtmlMode(
+  campaign: CampaignTemplateSource,
+  copy: { subject: string; body: string },
+  ctx: MergeTagContext
+): { subject: string; body: string } {
+  if ((campaign.emailBodyMode || 'ai') !== 'html') return copy;
+  const universal = parseUniversalTemplate(campaign.htmlEmailTemplates);
+  if (!universal) return copy;
+  if (isFullHtmlDocument(copy.body)) return copy;
+  return applyUniversalTemplate(
+    universal,
+    {
+      subject: copy.subject,
+      body: copy.body,
+      ctaUrl: campaign.bookingLink || campaign.ctaLink || '',
+    },
+    ctx
+  );
+}
+
+/**
+ * Build the HTML (and plain-text fallback) that actually goes out on the wire.
+ * This is the send-time safety net: toggling "Use email template" after drafts
+ * were generated still wraps them before they leave the inbox.
+ */
+export function prepareCampaignEmailHtml(
+  body: string,
+  campaign: CampaignTemplateSource,
+  ctx: MergeTagContext,
+  opts?: { applyTemplate?: boolean }
+): { html: string; text: string } {
+  const raw = body || '';
+  const text = isHtmlBody(raw) ? stripHtmlToText(raw) : raw;
+
+  let html = raw;
+  if (opts?.applyTemplate !== false) {
+    html = wrapBodyIfHtmlMode(campaign, { subject: '', body: raw }, ctx).body;
+  }
+  if (!isHtmlBody(html)) {
+    html = html.replace(/\r\n/g, '\n').replace(/\n/g, '<br/>');
+  }
+  return { html, text };
+}
+
+/** Insert markup before </body> so it is not dropped after </html>. */
+export function injectBeforeClose(html: string, snippet: string): string {
+  if (/<\/body>/i.test(html)) {
+    return html.replace(/<\/body>/i, `${snippet}</body>`);
+  }
+  return html + snippet;
+}

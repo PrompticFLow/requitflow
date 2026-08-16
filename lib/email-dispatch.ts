@@ -10,6 +10,7 @@ import {
   resolveResendApiKey,
 } from '@/lib/resend';
 import { fillMergeTags } from '@/lib/email/fill-merge-tags';
+import { injectBeforeClose, prepareCampaignEmailHtml } from '@/lib/email/html-templates';
 
 export interface SendCampaignEmailOptions {
   to: string;
@@ -74,6 +75,14 @@ export async function sendCampaignEmail({
   html = fillMergeTags(html, mergeCtx);
   if (text) text = fillMergeTags(text, mergeCtx);
 
+  // Wrap plain AI copy in the campaign's HTML template at send time. Reply
+  // emails (step >= 99) stay conversational and are not wrapped.
+  const prepared = prepareCampaignEmailHtml(html, campaign, mergeCtx, {
+    applyTemplate: emailSequence.sequenceStep < 99,
+  });
+  html = prepared.html;
+  if (!text) text = prepared.text;
+
   // An unsubscribe link is auto-appended to every tracked send (see below),
   // so a manual unsubscribe line is only required for untracked sends.
   const hasUnsubscribeLine = !!(campaign.unsubscribeLine && campaign.unsubscribeLine.trim().length > 0);
@@ -116,13 +125,19 @@ export async function sendCampaignEmail({
       return `<a${before}href="${trackingUrl}"${after}>`;
     });
 
-    // 2. Append unsubscribe footer
+    // 2. Append unsubscribe footer (inside </body> so designed HTML templates keep it)
     unsubscribeUrl = `${appUrl}/api/unsubscribe/${sendLogId}`;
-    finalHtml += `<br/><br/><p style="font-size:12px;color:#94a3b8;">Don't want these emails? <a href="${unsubscribeUrl}" style="color:#94a3b8;">Unsubscribe</a></p>`;
+    finalHtml = injectBeforeClose(
+      finalHtml,
+      `<br/><br/><p style="font-size:12px;color:#94a3b8;">Don't want these emails? <a href="${unsubscribeUrl}" style="color:#94a3b8;">Unsubscribe</a></p>`
+    );
 
     // 3. Inject open tracking pixel
     const pixelUrl = `${appUrl}/api/tracking/open/${sendLogId}`;
-    finalHtml += `<img src="${pixelUrl}" width="1" height="1" style="display:none;" alt="" />`;
+    finalHtml = injectBeforeClose(
+      finalHtml,
+      `<img src="${pixelUrl}" width="1" height="1" style="display:none;" alt="" />`
+    );
   }
 
   // Lead checks
@@ -168,7 +183,7 @@ export async function sendCampaignEmail({
         to,
         subject,
         html: finalHtml,
-        text: text || html.replace(/<[^>]+>/g, ''),
+        text: text || prepared.text,
         fromEmail: resendSender.fromEmail,
         fromName: campaign.senderName || user.name || undefined,
         replyTo: resendSender.fromEmail,
@@ -223,7 +238,7 @@ export async function sendCampaignEmail({
         from: `"${smtpAccount.fromName}" <${smtpAccount.fromEmail}>`,
         to,
         subject,
-        text: text || html.replace(/<[^>]+>/g, ''),
+        text: text || prepared.text,
         html: finalHtml
       };
 
@@ -268,7 +283,7 @@ export async function sendCampaignEmail({
       },
       subject,
       html: finalHtml,
-      text: text || html.replace(/<[^>]+>/g, ''),
+      text: text || prepared.text,
     };
 
     if (emailSequence.sequenceStep >= 99) {
@@ -348,7 +363,7 @@ export async function sendSequenceEmailNow(emailSequenceId: string) {
   const result = await sendCampaignEmail({
     to: email.lead.email || '',
     subject: email.subject,
-    html: /<[a-z][\s\S]*>/i.test(email.body) ? email.body : email.body.replace(/\n/g, '<br/>'),
+    html: email.body,
     campaignId: email.campaignId,
     leadId: email.leadId,
     emailSequenceId: email.id,
@@ -556,7 +571,7 @@ export async function processDueEmails({ userId, limit }: ProcessDueEmailsOption
       const result = await sendCampaignEmail({
         to: lead.email || '',
         subject: email.subject,
-        html: /<[a-z][\s\S]*>/i.test(email.body) ? email.body : email.body.replace(/\n/g, '<br/>'),
+        html: email.body,
         campaignId: campaign.id,
         leadId: lead.id,
         emailSequenceId: email.id,

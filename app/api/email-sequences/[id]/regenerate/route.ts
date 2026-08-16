@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
+import { wrapBodyIfHtmlMode } from '@/lib/email/html-templates';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -111,16 +112,22 @@ Return ONLY valid JSON (no markdown):
     let aiScore = parseInt(regenData.personalization_score);
     const personalizationScore = !isNaN(aiScore) ? aiScore : (lead.aiInsight ? 75 : lead.category ? 60 : 40);
 
+    const applied = wrapBodyIfHtmlMode(
+      campaign,
+      { subject: regenData.subject, body: regenData.body },
+      { lead, campaign, user }
+    );
+
     const updated = await prisma.emailSequence.update({
       where: { id },
       data: {
-        subject: regenData.subject,
+        subject: applied.subject,
         previewText: regenData.preview_text,
-        body: regenData.body,
+        body: applied.body,
         ctaText: regenData.cta_text,
         ctaLink: campaign.bookingLink || campaign.ctaLink || existing.ctaLink,
-        aiOriginalSubject: regenData.subject,
-        aiOriginalBody: regenData.body,
+        aiOriginalSubject: applied.subject,
+        aiOriginalBody: applied.body,
         // Reset manual edits — AI draft replaces them
         editedSubject: null,
         editedBody: null,

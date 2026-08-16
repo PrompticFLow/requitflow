@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { generateNextEmail } from '@/lib/ai/generate-next-email';
+import { wrapBodyIfHtmlMode } from '@/lib/email/html-templates';
 
 export const maxDuration = 300; // Vercel timeout max
 
@@ -116,6 +117,12 @@ export async function GET(req: Request) {
             kbResult
           });
 
+          const applied = wrapBodyIfHtmlMode(
+            cl.campaign,
+            { subject: generated.subject, body: generated.body },
+            { lead: cl.lead, campaign: cl.campaign }
+          );
+
           // Save the generated email as Queued and Approved so process-due can send it immediately
           await prisma.emailSequence.create({
             data: {
@@ -123,16 +130,16 @@ export async function GET(req: Request) {
               campaignId: cl.campaignId,
               leadId: cl.leadId,
               name: `Email ${targetStep}`,
-              subject: generated.subject,
-              body: generated.body,
+              subject: applied.subject,
+              body: applied.body,
               sequenceStep: targetStep,
               status: 'Queued',
               approvalStatus: 'Approved',
               scheduledAt: new Date(),
               ctaText: '',
               ctaLink: cl.campaign.bookingLink || cl.campaign.ctaLink || '',
-              aiOriginalSubject: generated.aiOriginalSubject,
-              aiOriginalBody: generated.aiOriginalBody,
+              aiOriginalSubject: applied.subject,
+              aiOriginalBody: applied.body,
               aiGenerationReason: generated.personalizationReason,
               spamRisk: generated.spamRisk,
               spamIssues: generated.spamIssues,

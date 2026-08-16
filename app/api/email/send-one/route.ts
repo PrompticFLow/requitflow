@@ -48,7 +48,7 @@ export async function POST(req: Request) {
     const sendResult = await sendCampaignEmail({
       to: sequence.lead.email,
       subject: finalSubject,
-      html: finalBody.replace(/\n/g, '<br/>'),
+      html: finalBody,
       campaignId: sequence.campaignId,
       leadId: sequence.leadId,
       emailSequenceId: sequence.id,

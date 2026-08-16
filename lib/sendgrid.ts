@@ -1,6 +1,7 @@
 import sgMail from '@sendgrid/mail';
 import { prisma } from '@/lib/prisma';
 import { fillMergeTags } from '@/lib/email/fill-merge-tags';
+import { prepareCampaignEmailHtml } from '@/lib/email/html-templates';
 
 export interface SendCampaignEmailOptions {
   to: string;
@@ -80,6 +81,12 @@ export async function sendCampaignEmail({
   html = fillMergeTags(html, mergeCtx);
   if (text) text = fillMergeTags(text, mergeCtx);
 
+  const prepared = prepareCampaignEmailHtml(html, campaign, mergeCtx, {
+    applyTemplate: emailSequence.sequenceStep < 99,
+  });
+  html = prepared.html;
+  if (!text) text = prepared.text;
+
   // Campaign checks
   if (campaign.status !== 'Active' && campaign.status !== 'Draft') {
     // Note: Allowing Draft if 'send-now' explicitly triggers after start, though prompt says "Active or sending is explicitly triggered after start"
@@ -143,7 +150,7 @@ export async function sendCampaignEmail({
     },
     subject,
     html,
-    text: text || html.replace(/<[^>]+>/g, ''), // Strip html tags if text is not provided
+    text: text || prepared.text,
   };
 
   try {

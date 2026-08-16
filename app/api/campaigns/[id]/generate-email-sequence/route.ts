@@ -5,6 +5,7 @@ import { generateAiResponse } from '@/lib/ai-provider';
 import { buildLeadPersonalization } from '@/lib/lead-personalization';
 import { buildCampaignIntelligence } from '@/lib/campaign-intelligence';
 import { analyzeCampaign } from '@/lib/ai/campaign-analysis';
+import { wrapBodyIfHtmlMode, universalTemplateLabel, parseUniversalTemplate } from '@/lib/email/html-templates';
 
 // ─── Knowledge Base Context Builder ───────────────────────────────────────────
 
@@ -417,15 +418,22 @@ If the model cannot generate, return: {"emails": []}`;
           let aiScore = parseInt(seq.personalizationScore);
           const personalizationScore = !isNaN(aiScore) ? aiScore : (lead.aiInsight ? 75 : lead.category ? 60 : 40);
 
+          const applied = wrapBodyIfHtmlMode(
+            campaign,
+            { subject: seq.subject.trim(), body: seq.body.trim() },
+            { lead, campaign, user }
+          );
+          const universalTemplate = parseUniversalTemplate(campaign.htmlEmailTemplates);
+
           await prisma.emailSequence.create({
             data: {
               userId: user.id,
               campaignId,
               leadId: lead.id,
               name: `Email ${stepNum}`,
-              subject: seq.subject.trim(),
+              subject: applied.subject,
               previewText: '',
-              body: seq.body.trim(),
+              body: applied.body,
               sequenceStep: stepNum,
               ctaText: '',
               ctaLink: campaign.bookingLink || campaign.ctaLink || '',
@@ -433,15 +441,17 @@ If the model cannot generate, return: {"emails": []}`;
               delayUnit: 'business_days',
               status: 'Draft',
               approvalStatus: 'Pending',
-              aiOriginalSubject: seq.subject,
-              aiOriginalBody: seq.body,
+              aiOriginalSubject: applied.subject,
+              aiOriginalBody: applied.body,
               aiGenerationReason: kbResult.hasKnowledge
                 ? `Generated using Knowledge Base (${kbResult.fileCount} file${kbResult.fileCount > 1 ? 's' : ''})`
                 : 'Generated using campaign fields (no Knowledge Base)',
               personalizationScore,
               spamRisk: seq.spamrisk ?? seq.spam_risk ?? seq.spamRisk ?? calculatedSpamRisk,
               personalizationReason: seq.personalizationreason ?? seq.personalization_reason ?? seq.personalizationReason ?? 'AI Generated',
-              emailType: seq.type || null,
+              emailType: (campaign.emailBodyMode === 'html' && universalTemplate)
+                ? universalTemplateLabel(universalTemplate)
+                : (seq.type || null),
               personalizationLevel: campaign.personalizationLevel || 'Medium',
               emailLength: campaign.emailLength || 'Short',
               spamSafety: campaign.spamSafety || 'High',
