@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Check, Server, Loader2, AlertCircle, Mail, Save, RefreshCw, Sparkles, KeyRound } from "lucide-react";
+import { Check, Loader2, Save, Sparkles, KeyRound } from "lucide-react";
 
 export default function SettingsPage() {
   const [jobSettings, setJobSettings] = useState<any>(null);
@@ -39,14 +39,6 @@ export default function SettingsPage() {
     dailyLimit: 10,
     delayBetweenEmailsSeconds: 120
   });
-  const [hasPassword, setHasPassword] = useState(false);
-  const [smtpLoading, setSmtpLoading] = useState(true);
-  const [smtpSaving, setSmtpSaving] = useState(false);
-  const [smtpTesting, setSmtpTesting] = useState(false);
-  const [sendingTestEmail, setSendingTestEmail] = useState(false);
-  const [smtpStatus, setSmtpStatus] = useState<any>({ isVerified: false, status: 'Unknown' });
-
-
   // Calendly State
   const [calendlyData, setCalendlyData] = useState<{
     connected: boolean;
@@ -138,15 +130,11 @@ export default function SettingsPage() {
             dailyLimit: smtp.dailyLimit || 10,
             delayBetweenEmailsSeconds: smtp.delayBetweenEmailsSeconds || 120
           });
-          setHasPassword(smtp.hasPassword);
-          setSmtpStatus({ isVerified: smtp.verified, status: smtp.verified ? 'Active' : 'Failed' });
         } else if (data && data.error) {
           console.error("SMTP config fetch error:", data.error);
         }
       } catch (err) {
         console.error(err);
-      } finally {
-        setSmtpLoading(false);
       }
     };
     loadSmtp();
@@ -262,77 +250,6 @@ export default function SettingsPage() {
       alert("Failed to save API keys.");
     }
     setApiKeysSaving(false);
-  };
-
-  const handleSaveSmtp = async () => {
-    setSmtpSaving(true);
-    // Log safe payload before request
-    console.log("Saving SMTP settings:", {
-      senderName: smtpData.senderName,
-      senderEmail: smtpData.senderEmail,
-      smtpHost: smtpData.smtpHost,
-      smtpPort: smtpData.smtpPort,
-      smtpSecure: smtpData.smtpSecure,
-      smtpUsername: smtpData.smtpUsername,
-      hasPassword: Boolean(smtpData.smtpPassword),
-      dailyLimit: smtpData.dailyLimit
-    });
-
-    try {
-      const res = await fetch("/api/settings/smtp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(smtpData)
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        alert(data.message || "SMTP settings saved successfully.");
-        setHasPassword(true);
-        // Clear password input field
-        setSmtpData(prev => ({ ...prev, smtpPassword: '' }));
-        // Set verified badge to Not Verified until user clicks Test SMTP
-        setSmtpStatus({ isVerified: false, status: 'Active' });
-      } else {
-        alert(data.error || "Failed to save SMTP settings.");
-      }
-    } catch (e) {
-      alert("An error occurred while saving settings.");
-    }
-    setSmtpSaving(false);
-  };
-
-  const handleTestSmtp = async () => {
-    setSmtpTesting(true);
-    try {
-      const res = await fetch("/api/settings/smtp/test", { method: "POST" });
-      const data = await res.json();
-      if (res.ok) {
-        alert("Success: " + data.message);
-        setSmtpStatus({ isVerified: true, status: 'Active' });
-      } else {
-        alert("Error: " + data.error);
-        setSmtpStatus({ isVerified: false, status: 'Failed' });
-      }
-    } catch (e) {
-      alert("An error occurred while testing connection.");
-    }
-    setSmtpTesting(false);
-  };
-
-  const handleSendTestEmail = async () => {
-    setSendingTestEmail(true);
-    try {
-      const res = await fetch("/api/settings/smtp/send-test-email", { method: "POST" });
-      const data = await res.json();
-      if (res.ok) {
-        alert("Success: " + data.message);
-      } else {
-        alert("Error: " + data.error);
-      }
-    } catch (e) {
-      alert("An error occurred while sending test email.");
-    }
-    setSendingTestEmail(false);
   };
 
   const handleDisconnectCalendly = async () => {
@@ -596,100 +513,6 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* SMTP Settings */}
-        <div id="smtp" className="glass p-8 rounded-2xl border border-slate-700/50 space-y-6 break-inside-avoid mb-6">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-            <div className="flex items-center space-x-3">
-              <Mail className="text-purple-400" size={24} />
-              <h3 className="text-xl font-bold text-white">SMTP Settings</h3>
-            </div>
-            {smtpStatus.isVerified && (
-              <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs rounded border border-green-500/30 flex items-center space-x-1">
-                <Check size={14} /> <span>Verified</span>
-              </span>
-            )}
-            {!smtpStatus.isVerified && smtpStatus.status === 'Failed' && (
-              <span className="px-2 py-1 bg-red-500/20 text-red-400 text-xs rounded border border-red-500/30">
-                Connection Failed
-              </span>
-            )}
-          </div>
-          
-          <p className="text-sm text-slate-400 leading-relaxed mb-4">
-            Connect your own SMTP sender. For safety, campaigns can send maximum 10 emails per day by default, with at least 1 minute delay between emails.
-          </p>
-
-          <div className="bg-slate-800/50 p-4 rounded-lg mb-6 text-xs text-slate-300 space-y-2 border border-slate-700">
-            <p className="font-medium text-slate-200">Gmail Configuration Examples:</p>
-            <ul className="list-disc pl-4 space-y-1 text-slate-400">
-              <li><strong>SSL:</strong> Host: smtp.gmail.com | Port: 465 | Secure: true</li>
-              <li><strong>TLS:</strong> Host: smtp.gmail.com | Port: 587 | Secure: false</li>
-              <li><strong>Password:</strong> Use a <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">Google App Password</a>, not your normal Gmail password.</li>
-            </ul>
-          </div>
-
-          {smtpLoading ? (
-            <div className="flex justify-center py-6"><Loader2 className="animate-spin text-purple-500" /></div>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-400">Sender Name</label>
-                  <input type="text" value={smtpData.senderName} onChange={e => setSmtpData({...smtpData, senderName: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500" placeholder="John Doe" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-400">Sender Email</label>
-                  <input type="email" value={smtpData.senderEmail} onChange={e => setSmtpData({...smtpData, senderEmail: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500" placeholder="john@example.com" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-1 col-span-2">
-                  <label className="text-sm font-medium text-slate-400">SMTP Host</label>
-                  <input type="text" value={smtpData.smtpHost} onChange={e => setSmtpData({...smtpData, smtpHost: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500" placeholder="smtp.gmail.com" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-400">Port</label>
-                  <input type="text" value={smtpData.smtpPort} onChange={e => setSmtpData({...smtpData, smtpPort: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500" placeholder="587" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-400">SMTP Username</label>
-                  <input type="text" value={smtpData.smtpUsername} onChange={e => setSmtpData({...smtpData, smtpUsername: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-400">SMTP Password</label>
-                  <input type="password" value={smtpData.smtpPassword} onChange={e => setSmtpData({...smtpData, smtpPassword: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500" placeholder={hasPassword ? "Saved password hidden. Enter a new password only to replace it." : ""} />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex items-center space-x-2 pt-6">
-                  <input type="checkbox" id="secure" checked={smtpData.smtpSecure} onChange={e => setSmtpData({...smtpData, smtpSecure: e.target.checked})} className="w-4 h-4 rounded border-slate-600 bg-slate-900 cursor-pointer" />
-                  <label htmlFor="secure" className="text-sm font-medium text-slate-400 cursor-pointer">Use Secure / TLS</label>
-                </div>
-              </div>
-
-              <div className="flex flex-col space-y-3 pt-4">
-                <div className="flex space-x-3">
-                  <button onClick={handleSaveSmtp} disabled={smtpSaving} className="flex-1 px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition-colors shadow-lg flex items-center justify-center gap-2">
-                    {smtpSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />} Save SMTP Settings
-                  </button>
-                  <button onClick={handleTestSmtp} disabled={smtpTesting || (!hasPassword && !smtpData.smtpPassword)} className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium transition-colors border border-slate-700 flex items-center justify-center gap-2">
-                    {smtpTesting ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />} Test SMTP
-                  </button>
-                </div>
-                {smtpStatus.isVerified && (
-                  <button onClick={handleSendTestEmail} disabled={sendingTestEmail} className="w-full px-4 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors shadow-lg flex items-center justify-center gap-2">
-                    {sendingTestEmail ? <Loader2 size={18} className="animate-spin" /> : <Mail size={18} />} Send Test Email
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
           {/* Safety & Anti-Ban Settings */}
           <div className="glass p-8 rounded-2xl border border-slate-700/50 space-y-6 break-inside-avoid mb-6">
             <div className="flex items-center space-x-3 border-b border-slate-800 pb-4">

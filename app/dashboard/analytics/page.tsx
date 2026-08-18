@@ -61,7 +61,7 @@ export default function AnalyticsPage() {
             <Link href="/generate-leads" className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-lg font-medium transition-all shadow-lg shadow-blue-500/25">
               Find Client Leads
             </Link>
-            <Link href="/campaigns" className="bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-lg font-medium transition-all">
+            <Link href="/dashboard/ai-email-agent" className="bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-lg font-medium transition-all">
               Create Campaign
             </Link>
           </div>

@@ -75,7 +75,6 @@ function getNextAction(camp: Campaign): { label: string; action: string } {
   if ((camp.totalDrafts ?? 0) === 0) return { label: "Generate AI emails", action: "generate" };
   if ((camp.pendingReview ?? 0) > 0) return { label: "Review & approve Email 1", action: "review" };
   if (!camp.bookingLink && !camp.ctaLink) return { label: "Add booking link", action: "edit" };
-  if (!camp.senderEmail) return { label: "Connect sender email", action: "settings" };
   if (!camp.unsubscribeLine) return { label: "Add unsubscribe line", action: "edit" };
   if (camp.status === "Active") return { label: "Monitor replies", action: "replies" };
   if (camp.status === "Paused") return { label: "Resume campaign", action: "resume" };
@@ -668,9 +667,6 @@ export default function AIEmailAgentPage() {
           <p className="text-slate-400 max-w-2xl">Create campaigns, select leads, generate AI email drafts, review them, and launch safely. Nothing sends without your approval.</p>
         </div>
         <div className="flex gap-3 flex-wrap">
-          <Link href="/dashboard/campaigns" id="btn-view-campaigns" className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors border border-slate-700 text-sm">
-            View All Campaigns
-          </Link>
           <button id="btn-create-campaign" onClick={openWizard} className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-lg font-medium transition-all shadow-lg shadow-purple-500/25 text-sm">
             <Plus size={16} /> Create Campaign
           </button>
@@ -733,7 +729,6 @@ export default function AIEmailAgentPage() {
                             {camp.name}
                           </Link>
                           <StatusBadge status={camp.status} />
-                          <span className="text-xs text-slate-600 bg-slate-800 px-2 py-0.5 rounded">{camp.campaignType || "Outreach"}</span>
                         </div>
                         <p className="text-sm text-slate-400 truncate mb-2">{camp.targetAudience || "Target audience not set"} • {camp.offer || "No offer set"}</p>
                         {/* Stats row */}
@@ -776,7 +771,6 @@ export default function AIEmailAgentPage() {
                               else if (nextAction.action === "generate") setGenerateModalId(camp.id);
                               else if (nextAction.action === "review") router.push(`/dashboard/campaigns/${camp.id}`);
                               else if (nextAction.action === "edit") { setEditCampaign(camp); setEditModalOpen(true); }
-                              else if (nextAction.action === "settings") { window.location.href = "/dashboard/settings"; }
                               else if (nextAction.action === "replies") { window.location.href = "/dashboard/replies"; }
                               else if (nextAction.action === "addLeads") router.push(`/dashboard/campaigns/${camp.id}`);
                             }}
@@ -858,22 +852,6 @@ export default function AIEmailAgentPage() {
                         onChange={e => setWizardData(d => ({ ...d, targetLocation: e.target.value }))}
                         placeholder="e.g. United States"
                         className="w-full px-3 py-2 rounded-xl text-sm" />
-                    </InputField>
-                    <InputField label="Campaign Type">
-                      <select value={wizardData.campaignType} onChange={e => setWizardData(d => ({ ...d, campaignType: e.target.value }))} className="w-full px-3 py-2 rounded-xl text-sm">
-                        {["Client Outreach", "Sales Outreach", "Follow-up", "Re-Engagement", "Other"].map(o => <option key={o}>{o}</option>)}
-                      </select>
-                    </InputField>
-                    <InputField label="Campaign Goal" helper="What do you want to achieve?">
-                      <input type="text" value={wizardData.goal}
-                        onChange={e => setWizardData(d => ({ ...d, goal: e.target.value }))}
-                        placeholder="e.g. Book discovery calls"
-                        className="w-full px-3 py-2 rounded-xl text-sm" />
-                    </InputField>
-                    <InputField label="Language">
-                      <select value={wizardData.language} onChange={e => setWizardData(d => ({ ...d, language: e.target.value }))} className="w-full px-3 py-2 rounded-xl text-sm">
-                        {["English", "Spanish", "French", "German", "Portuguese", "Italian", "Dutch", "Russian", "Chinese", "Japanese", "Arabic", "Hindi", "Korean", "Turkish"].map(o => <option key={o}>{o}</option>)}
-                      </select>
                     </InputField>
                   </div>
                 </div>
@@ -1141,11 +1119,10 @@ export default function AIEmailAgentPage() {
                     <>
                       <div className="grid grid-cols-2 gap-3 text-sm">
                         {[
-                          ["Campaign", wizardData.name], ["Goal", wizardData.goal || "—"],
+                          ["Campaign", wizardData.name],
                           ["Leads selected", String(selectedLeadIds.length)],
                           ["Emails per lead", String(activeSteps)],
                           ["Total drafts", String(totalDraftCount)],
-                          ["Sender email", wizardData.senderEmail || "Not set"],
                           ["Booking link", wizardData.bookingLink ? "✓ Set" : "⚠ Not set"],
                           ["Unsubscribe line", wizardData.unsubscribeLine ? "✓ Set" : "⚠ Not set"],
                           ["AI tone", wizardData.tone], ["Personalization", wizardData.personalizationLevel],
@@ -1341,7 +1318,7 @@ export default function AIEmailAgentPage() {
             </div>
             <div className="overflow-y-auto flex-1 p-5 space-y-3">
               <p className="text-sm text-slate-400">Complete the missing items below before starting this campaign.</p>
-              {readinessModal.items.map(item => (
+              {readinessModal.items.filter(item => item.key !== "senderEmail").map(item => (
                 <div key={item.key} className={`flex items-center gap-3 p-4 rounded-xl border ${item.passed ? "bg-emerald-500/5 border-emerald-500/20" : "bg-red-500/5 border-red-500/20"}`}>
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${item.passed ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"}`}>
                     {item.passed ? <Check size={15} strokeWidth={3} /> : <X size={15} strokeWidth={3} />}
@@ -1352,8 +1329,7 @@ export default function AIEmailAgentPage() {
                   </div>
                   {!item.passed && (
                     <button onClick={() => {
-                      if (item.key === "senderEmail") window.location.href = "/dashboard/settings";
-                      else if (item.key === "email1Generated" && readinessModal.campaignId) setGenerateModalId(readinessModal.campaignId);
+                      if (item.key === "email1Generated" && readinessModal.campaignId) setGenerateModalId(readinessModal.campaignId);
                       else if (item.key === "email1Approved" && readinessModal.campaignId) {
                         router.push(`/dashboard/campaigns/${readinessModal.campaignId}`);
                         setReadinessModal(s => ({ ...s, open: false }));

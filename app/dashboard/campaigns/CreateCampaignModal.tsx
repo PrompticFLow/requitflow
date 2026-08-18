@@ -114,18 +114,9 @@ export default function CreateCampaignModal({
                 <p className="text-xs text-slate-500 mt-1">AI generates this many emails per lead, spaced out automatically.</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-400 mb-1">Campaign Goal</label>
-                <select value={formData.goal} onChange={e => handleChange("goal", e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all">
-                  <option value="Book discovery calls">Book discovery calls</option>
-                  <option value="Get demo requests">Get demo requests</option>
-                  <option value="Lead generation / Email replies">Lead generation / Email replies</option>
-                </select>
+                <label className="block text-sm font-medium text-slate-400 mb-1">Sender Name</label>
+                <input type="text" value={formData.senderName} onChange={e => handleChange("senderName", e.target.value)} placeholder="e.g. John Doe" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all" />
               </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-400 mb-1">Sender Name</label>
-              <input type="text" value={formData.senderName} onChange={e => handleChange("senderName", e.target.value)} placeholder="e.g. John Doe" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all" />
             </div>
           </form>
         </div>

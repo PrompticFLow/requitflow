@@ -1,12 +1,14 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Search, Filter, Loader2, MessageSquare, Reply as ReplyIcon, CheckCircle2, XCircle, AlertCircle, Calendar, RefreshCw } from "lucide-react";
+import { Loader2, MessageSquare, Reply as ReplyIcon, CheckCircle2, XCircle, Calendar, RefreshCw, Trash2, X } from "lucide-react";
 import { extractLatestReplyText } from "@/lib/email/strip-quoted-reply";
 
 export default function RepliesPage() {
   const [loading, setLoading] = useState(true);
   const [replies, setReplies] = useState<any[]>([]);
   const [hasAiMode, setHasAiMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkWorking, setBulkWorking] = useState(false);
 
   // Manual reply state
   const [editingReplyId, setEditingReplyId] = useState<string | null>(null);
@@ -21,6 +23,7 @@ export default function RepliesPage() {
       const data = await res.json();
       if (data.replies) setReplies(data.replies);
       setHasAiMode(data.hasAiModeEnabled || false);
+      setSelectedIds(new Set());
     } catch(e) { console.error(e) }
     setLoading(false);
   };
@@ -28,6 +31,26 @@ export default function RepliesPage() {
   useEffect(() => {
     fetchReplies();
   }, []);
+
+  const allSelected = replies.length > 0 && selectedIds.size === replies.length;
+  const someSelected = selectedIds.size > 0;
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(replies.map((r) => r.id)));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const handleAction = async (id: string, action: string) => {
     try {
@@ -38,6 +61,53 @@ export default function RepliesPage() {
       });
       if (res.ok) await fetchReplies();
     } catch(e) { console.error(e) }
+  };
+
+  const handleDeleteOne = async (id: string) => {
+    if (!confirm("Delete this message? This cannot be undone.")) return;
+    setBulkWorking(true);
+    try {
+      const res = await fetch("/api/replies/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [id], action: "delete" }),
+      });
+      if (res.ok) await fetchReplies();
+      else {
+        const data = await res.json();
+        alert(data.error || "Failed to delete message.");
+      }
+    } catch (e) {
+      alert("An error occurred while deleting.");
+    }
+    setBulkWorking(false);
+  };
+
+  const handleBulkAction = async (action: string) => {
+    if (selectedIds.size === 0) return;
+
+    if (action === "delete") {
+      if (!confirm(`Delete ${selectedIds.size} message${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    } else if (action === "unsubscribed") {
+      if (!confirm(`Unsubscribe ${selectedIds.size} lead${selectedIds.size === 1 ? "" : "s"} from selected replies?`)) return;
+    }
+
+    setBulkWorking(true);
+    try {
+      const res = await fetch("/api/replies/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedIds), action }),
+      });
+      if (res.ok) await fetchReplies();
+      else {
+        const data = await res.json();
+        alert(data.error || "Bulk action failed.");
+      }
+    } catch (e) {
+      alert("An error occurred while performing the bulk action.");
+    }
+    setBulkWorking(false);
   };
 
   const handleSendReply = async (id: string) => {
@@ -147,6 +217,58 @@ export default function RepliesPage() {
         </div>
       )}
 
+      {someSelected && (
+        <div className="sticky top-4 z-30 bg-purple-900/40 border border-purple-500/50 rounded-lg px-4 py-3 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 shadow-2xl backdrop-blur-md">
+          <span className="text-sm text-white font-bold">
+            {selectedIds.size} {selectedIds.size === 1 ? "message" : "messages"} selected
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => handleBulkAction("interested")}
+              disabled={bulkWorking}
+              className="px-3 py-1.5 bg-green-600 hover:bg-green-500 disabled:opacity-60 text-white text-xs rounded-md border border-green-500 flex items-center gap-1 font-medium transition-colors"
+            >
+              <CheckCircle2 size={13} /> Mark Interested
+            </button>
+            <button
+              onClick={() => handleBulkAction("booked")}
+              disabled={bulkWorking}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white text-xs rounded-md border border-blue-500 flex items-center gap-1 font-medium transition-colors"
+            >
+              <Calendar size={13} /> Mark Booked
+            </button>
+            <button
+              onClick={() => handleBulkAction("unsubscribed")}
+              disabled={bulkWorking}
+              className="px-3 py-1.5 bg-red-600/80 hover:bg-red-500 disabled:opacity-60 text-white text-xs rounded-md border border-red-500 flex items-center gap-1 font-medium transition-colors"
+            >
+              <XCircle size={13} /> Unsubscribe
+            </button>
+            <button
+              onClick={() => handleBulkAction("handled")}
+              disabled={bulkWorking}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-60 text-slate-200 text-xs rounded-md border border-slate-600 flex items-center gap-1 font-medium transition-colors"
+            >
+              Dismiss
+            </button>
+            <button
+              onClick={() => handleBulkAction("delete")}
+              disabled={bulkWorking}
+              className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white text-xs rounded-md border border-red-500 flex items-center gap-1 font-medium transition-colors"
+            >
+              {bulkWorking ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              Delete
+            </button>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-md border border-slate-700 flex items-center gap-1"
+            >
+              <X size={13} /> Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="glass rounded-2xl border border-slate-700/50 overflow-hidden">
         {loading ? (
           <div className="p-12 flex justify-center">
@@ -159,20 +281,39 @@ export default function RepliesPage() {
           </div>
         ) : (
           <div className="divide-y divide-slate-800">
+            <div className="px-6 py-3 bg-slate-900/50 flex items-center gap-3 border-b border-slate-800">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleSelectAll}
+                className="w-4 h-4 rounded border-slate-600 bg-slate-900 cursor-pointer accent-purple-600"
+                aria-label="Select all messages"
+              />
+              <span className="text-xs text-slate-400">Select all</span>
+            </div>
             {replies.map((reply) => (
-              <div key={reply.id} className={`p-6 ${reply.status === 'Unread' ? 'bg-slate-800/30' : 'opacity-70'}`}>
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h3 className="text-lg font-bold text-white flex items-center space-x-3">
-                      <span>{reply.lead?.businessName || 'Unknown Lead'}</span>
-                      {getCategoryBadge(reply.aiCategory)}
-                      {reply.status === 'Unread' && <span className="w-2 h-2 rounded-full bg-purple-500"></span>}
-                    </h3>
-                    <p className="text-sm text-slate-400 mt-1">
-                      Campaign: {reply.campaign?.name || 'Unknown'} • {new Date(reply.createdAt).toLocaleString()}
-                    </p>
+              <div key={reply.id} className={`p-6 ${selectedIds.has(reply.id) ? "bg-purple-900/10" : reply.status === "Unread" ? "bg-slate-800/30" : "opacity-70"}`}>
+                <div className="flex justify-between items-start mb-4 gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(reply.id)}
+                      onChange={() => toggleSelect(reply.id)}
+                      className="mt-1.5 w-4 h-4 rounded border-slate-600 bg-slate-900 cursor-pointer accent-purple-600 shrink-0"
+                      aria-label={`Select reply from ${reply.lead?.businessName || "Unknown Lead"}`}
+                    />
+                    <div className="min-w-0">
+                      <h3 className="text-lg font-bold text-white flex items-center space-x-3 flex-wrap">
+                        <span>{reply.lead?.businessName || 'Unknown Lead'}</span>
+                        {getCategoryBadge(reply.aiCategory)}
+                        {reply.status === 'Unread' && <span className="w-2 h-2 rounded-full bg-purple-500"></span>}
+                      </h3>
+                      <p className="text-sm text-slate-400 mt-1">
+                        Campaign: {reply.campaign?.name || 'Unknown'} • {new Date(reply.createdAt).toLocaleString()}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex space-x-2">
+                  <div className="flex space-x-2 flex-wrap justify-end shrink-0">
                     <button onClick={() => handleAction(reply.id, 'interested')} className="px-3 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 text-xs rounded transition-colors border border-green-500/20 flex items-center space-x-1">
                       <CheckCircle2 size={14} /> <span>Mark Interested</span>
                     </button>
@@ -185,15 +326,23 @@ export default function RepliesPage() {
                     <button onClick={() => handleAction(reply.id, 'handled')} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded transition-colors border border-slate-600">
                       Dismiss
                     </button>
+                    <button
+                      onClick={() => handleDeleteOne(reply.id)}
+                      disabled={bulkWorking}
+                      className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded transition-colors border border-red-500/20"
+                      title="Delete message"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 </div>
 
-                <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mb-4">
+                <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mb-4 ml-7">
                   <p className="text-sm text-slate-300 whitespace-pre-wrap">{extractLatestReplyText(reply.emailBody || '')}</p>
                 </div>
 
                 {reply.aiSuggestedReply && (
-                  <div className="bg-purple-900/10 border border-purple-500/20 rounded-lg p-4">
+                  <div className="bg-purple-900/10 border border-purple-500/20 rounded-lg p-4 ml-7">
                     <div className="flex items-center space-x-2 text-purple-400 mb-2 font-medium text-sm">
                       <ReplyIcon size={16} />
                       <span>AI Suggested Response</span>
@@ -205,7 +354,7 @@ export default function RepliesPage() {
 
                 {/* Manual Reply Editor */}
                 {editingReplyId === reply.id ? (
-                  <div className="mt-4 bg-slate-800 rounded-lg border border-slate-600 p-4">
+                  <div className="mt-4 bg-slate-800 rounded-lg border border-slate-600 p-4 ml-7">
                     <div className="mb-3">
                       <label className="block text-xs font-medium text-slate-400 mb-1">Subject</label>
                       <input 
@@ -243,7 +392,7 @@ export default function RepliesPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-3">
+                  <div className="mt-3 ml-7">
                     <button 
                       onClick={() => {
                         setEditingReplyId(reply.id);
