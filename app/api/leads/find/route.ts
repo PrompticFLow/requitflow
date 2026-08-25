@@ -1,8 +1,17 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
-import { searchLeads, type LeadRecord, type DecisionMakerRole } from '@/services/peopledatalabs';
+import { searchLeads, PdlApiError, type LeadRecord, type DecisionMakerRole } from '@/services/peopledatalabs';
 import { resolveUserApiKey, ByokKeyMissingError } from '@/lib/byok';
+
+function pdlHttpStatus(err: any): number {
+  const status = err instanceof PdlApiError ? err.statusCode : Number(err?.statusCode);
+  if (status === 402) return 402;
+  if (status === 429) return 429;
+  if (status === 401 || status === 400) return 400;
+  if (status >= 500) return 502;
+  return 400;
+}
 
 // PDL searches are fast, but scoring + DB writes can add up on large result sets.
 export const maxDuration = 120;
@@ -41,6 +50,18 @@ function dedupeKeys(rec: { pdlId?: string | null; linkedinUrl?: string | null; e
 }
 
 export async function POST(req: Request) {
+  try {
+    return await handleFindLeads(req);
+  } catch (err: any) {
+    console.error('Find leads failed:', err);
+    return NextResponse.json(
+      { error: err?.message || 'Search failed. Please try again.' },
+      { status: 500 }
+    );
+  }
+}
+
+async function handleFindLeads(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -48,7 +69,7 @@ export async function POST(req: Request) {
   try {
     apiKey = await resolveUserApiKey(user.id, 'pdl');
   } catch (e: any) {
-    if (e instanceof ByokKeyMissingError) {
+    if (e instanceof ByokKeyMissingError || e?.name === 'ByokKeyMissingError') {
       return NextResponse.json({ error: e.message }, { status: 400 });
     }
     throw e;
@@ -116,7 +137,10 @@ export async function POST(req: Request) {
     notice = result.notice;
   } catch (err: any) {
     console.error('PDL search error:', err);
-    return NextResponse.json({ error: err.message || 'People Data Labs search failed' }, { status: 502 });
+    return NextResponse.json(
+      { error: err?.message || 'People Data Labs search failed' },
+      { status: pdlHttpStatus(err) }
+    );
   }
 
   const pageSize = Math.min(Math.max(size ?? 25, 1), 100);

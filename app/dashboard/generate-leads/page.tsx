@@ -143,13 +143,24 @@ export default function GenerateLeadsPage() {
     try {
       const res = await fetch("/api/leads/find", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           industry, keywords, location, country, companySizes, roles,
           size: perPage, page, scrollToken: token,
         }),
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(
+          /^\s*</.test(text)
+            ? "Search failed because the server returned an error page instead of results. Check your People Data Labs search credits and try again."
+            : "Search failed: the server returned an invalid response."
+        );
+      }
 
       if (!res.ok) {
         if (res.status === 401 || data.error === "Unauthorized") {

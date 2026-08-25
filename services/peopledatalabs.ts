@@ -28,6 +28,18 @@ const PDL_BASE_URL = process.env.PDL_BASE_URL || 'https://api.peopledatalabs.com
 
 export type DecisionMakerRole = 'hr_talent' | 'founders_execs' | 'sales_marketing';
 
+/** Upstream PDL failure with the HTTP status we should surface to the client. */
+export class PdlApiError extends Error {
+  statusCode: number;
+  errorType?: string;
+  constructor(message: string, statusCode: number, errorType?: string) {
+    super(message);
+    this.name = 'PdlApiError';
+    this.statusCode = statusCode;
+    this.errorType = errorType;
+  }
+}
+
 export interface PdlSearchParams {
   industry?: string;        // must be a PDL taxonomy value, e.g. "computer software"
   keywords?: string;        // comma-separated title keywords, matched as *keyword*
@@ -103,6 +115,50 @@ export const PDL_INDUSTRIES = [
 /** PDL indexes these values lowercased. */
 const lc = (s?: string | null) => (s ? String(s).trim().toLowerCase() : undefined);
 
+/** Common country nicknames → PDL `job_company_location_country` values. */
+const COUNTRY_ALIASES: Record<string, string> = {
+  uae: 'united arab emirates',
+  uk: 'united kingdom',
+  britain: 'united kingdom',
+  'great britain': 'united kingdom',
+  england: 'united kingdom',
+  usa: 'united states',
+  us: 'united states',
+  america: 'united states',
+};
+
+/** Cities often typed into the Country field — search locality + the real country. */
+const CITY_COUNTRY: Record<string, string> = {
+  dubai: 'united arab emirates',
+  'abu dhabi': 'united arab emirates',
+  sharjah: 'united arab emirates',
+};
+
+function pdlErrorType(err: any): string | undefined {
+  const t = err?.type;
+  if (typeof t === 'string') return t;
+  if (Array.isArray(t) && typeof t[0] === 'string') return t[0];
+  return undefined;
+}
+
+function pdlErrorMessage(data: any, status: number): string {
+  const err = data?.error;
+  const type = pdlErrorType(err);
+  const msg = typeof err?.message === 'string' ? err.message.trim() : '';
+
+  if (status === 402 || type === 'payment_required') {
+    return 'People Data Labs search credits are used up. Add more search credits in your People Data Labs account, then try again.';
+  }
+  if (status === 401 || type === 'authentication_error') {
+    return 'People Data Labs API key is missing or invalid.';
+  }
+  if (status === 429 || type === 'rate_limit_error') {
+    return 'People Data Labs rate limit reached. Wait a moment and try again.';
+  }
+  if (msg) return msg;
+  return `People Data Labs request failed (${status})`;
+}
+
 /** Title keywords are comma-separated and matched as "contains". */
 export function parseTitleKeywords(keywords?: string | null): string[] {
   return (keywords || '')
@@ -118,8 +174,18 @@ function buildQuery(params: PdlSearchParams): { query: object; appliedTitles: st
   const region = lc(params.location);
   if (region) must.push({ term: { job_company_location_region: region } });
 
-  const country = lc(params.country);
-  if (country) must.push({ term: { job_company_location_country: country } });
+  const countryInput = lc(params.country);
+  if (countryInput) {
+    const cityCountry = CITY_COUNTRY[countryInput];
+    if (cityCountry) {
+      must.push({ term: { job_company_location_locality: countryInput } });
+      must.push({ term: { job_company_location_country: cityCountry } });
+    } else {
+      must.push({
+        term: { job_company_location_country: COUNTRY_ALIASES[countryInput] || countryInput },
+      });
+    }
+  }
 
   const industry = lc(params.industry);
   if (industry) must.push({ term: { job_company_industry: industry } });
@@ -280,7 +346,10 @@ async function postWithRetry(apiKey: string, body: object, attempts = 3): Promis
     try {
       data = text ? JSON.parse(text) : {};
     } catch {
-      lastError = new Error(`People Data Labs returned a non-JSON response (${res.status}).`);
+      lastError = new PdlApiError(
+        `People Data Labs returned a non-JSON response (${res.status}).`,
+        res.status >= 400 ? res.status : 502
+      );
       data = null;
     }
 
@@ -295,7 +364,7 @@ async function postWithRetry(apiKey: string, body: object, attempts = 3): Promis
     if (data !== null) return { res, data };
   }
 
-  throw lastError || new Error('People Data Labs request failed.');
+  throw lastError || new PdlApiError('People Data Labs request failed.', 502);
 }
 
 /**
@@ -317,13 +386,8 @@ export async function searchLeads(apiKey: string, params: PdlSearchParams): Prom
     return { leads: [], total: 0, scrollToken: null, appliedTitles, verifiedEmailsAvailable: false };
   }
 
-  if (res.status === 429) {
-    throw new Error('People Data Labs rate limit reached. Wait a moment and try again.');
-  }
-
   if (!res.ok) {
-    const msg = data?.error?.message || data?.error || `People Data Labs request failed (${res.status})`;
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    throw new PdlApiError(pdlErrorMessage(data, res.status), res.status, pdlErrorType(data?.error));
   }
 
   const people: any[] = Array.isArray(data.data) ? data.data : [];
