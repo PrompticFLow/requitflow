@@ -15,11 +15,10 @@ export default function SettingsPage() {
   const [apiKeysConfigured, setApiKeysConfigured] = useState<Record<string, boolean>>({});
   const [apiKeysData, setApiKeysData] = useState({
     openRouterKeyEncrypted: '',
-    neverBounceKeyEncrypted: '',
+    opporaKeyEncrypted: '',
     apifyTokenEncrypted: '',
     bayOfAssetsKeyEncrypted: '',
     bayOfAssetsModel: '',
-    pdlKeyEncrypted: '',
     resendKeyEncrypted: '',
     twilioSidEncrypted: '',
     twilioAuthTokenEncrypted: '',
@@ -71,11 +70,10 @@ export default function SettingsPage() {
           setApiKeysData(prev => ({
             ...prev,
             openRouterKeyEncrypted: data.settings.openRouterKeyEncrypted === '********' ? '' : (data.settings.openRouterKeyEncrypted || ''),
-            neverBounceKeyEncrypted: data.settings.neverBounceKeyEncrypted === '********' ? '' : (data.settings.neverBounceKeyEncrypted || ''),
+            opporaKeyEncrypted: data.settings.opporaKeyEncrypted === '********' ? '' : (data.settings.opporaKeyEncrypted || ''),
             apifyTokenEncrypted: data.settings.apifyTokenEncrypted === '********' ? '' : (data.settings.apifyTokenEncrypted || ''),
             bayOfAssetsKeyEncrypted: data.settings.bayOfAssetsKeyEncrypted === '********' ? '' : (data.settings.bayOfAssetsKeyEncrypted || ''),
             bayOfAssetsModel: data.settings.bayOfAssetsModel || '',
-            pdlKeyEncrypted: data.settings.pdlKeyEncrypted === '********' ? '' : (data.settings.pdlKeyEncrypted || ''),
             resendKeyEncrypted: data.settings.resendKeyEncrypted === '********' ? '' : (data.settings.resendKeyEncrypted || ''),
             twilioSidEncrypted: data.settings.twilioSidEncrypted === '********' ? '' : (data.settings.twilioSidEncrypted || ''),
             twilioAuthTokenEncrypted: data.settings.twilioAuthTokenEncrypted === '********' ? '' : (data.settings.twilioAuthTokenEncrypted || ''),
@@ -192,10 +190,9 @@ export default function SettingsPage() {
       const payload: Record<string, string> = {};
       const secretFields = [
         'openRouterKeyEncrypted',
-        'neverBounceKeyEncrypted',
+        'opporaKeyEncrypted',
         'apifyTokenEncrypted',
         'bayOfAssetsKeyEncrypted',
-        'pdlKeyEncrypted',
         'resendKeyEncrypted',
         'twilioSidEncrypted',
         'twilioAuthTokenEncrypted',
@@ -231,11 +228,10 @@ export default function SettingsPage() {
         setApiKeysData(prev => ({
           ...prev,
           openRouterKeyEncrypted: '',
-          neverBounceKeyEncrypted: '',
+          opporaKeyEncrypted: '',
           apifyTokenEncrypted: '',
           bayOfAssetsKeyEncrypted: '',
-          pdlKeyEncrypted: '',
-          resendKeyEncrypted: '',
+                resendKeyEncrypted: '',
           twilioSidEncrypted: '',
           twilioAuthTokenEncrypted: '',
         }));
@@ -360,17 +356,17 @@ export default function SettingsPage() {
 
               <div className="space-y-1">
                 <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
-                  NeverBounce API Key
-                  {apiKeysConfigured.neverbounce && (
+                  Oppora API Key
+                  {apiKeysConfigured.oppora && (
                     <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded border border-green-500/30">Saved</span>
                   )}
                 </label>
                 <input
                   type="password"
-                  value={apiKeysData.neverBounceKeyEncrypted}
-                  onChange={e => setApiKeysData({ ...apiKeysData, neverBounceKeyEncrypted: e.target.value })}
+                  value={apiKeysData.opporaKeyEncrypted}
+                  onChange={e => setApiKeysData({ ...apiKeysData, opporaKeyEncrypted: e.target.value })}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
-                  placeholder={apiKeysConfigured.neverbounce ? "Saved key hidden. Enter a new key only to replace it." : ""}
+                  placeholder={apiKeysConfigured.oppora ? "Saved key hidden. Enter a new key only to replace it." : "opp_live_..."}
                   autoComplete="off"
                 />
               </div>
@@ -417,23 +413,6 @@ export default function SettingsPage() {
                   onChange={e => setApiKeysData({ ...apiKeysData, bayOfAssetsModel: e.target.value })}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
                   placeholder="Optional model override"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
-                  People Data Labs API Key
-                  {apiKeysConfigured.pdl && (
-                    <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded border border-green-500/30">Saved</span>
-                  )}
-                </label>
-                <input
-                  type="password"
-                  value={apiKeysData.pdlKeyEncrypted}
-                  onChange={e => setApiKeysData({ ...apiKeysData, pdlKeyEncrypted: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500"
-                  placeholder={apiKeysConfigured.pdl ? "Saved key hidden. Enter a new key only to replace it." : ""}
-                  autoComplete="off"
                 />
               </div>
 

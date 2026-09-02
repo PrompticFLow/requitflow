@@ -16,9 +16,9 @@ const ROLE_OPTIONS: { value: Role; label: string; hint: string }[] = [
   { value: "sales_marketing", label: "Sales & Marketing", hint: "VPs / Heads of Sales & Marketing" },
 ];
 
-// People Data Labs company-size buckets (must match PDL values exactly).
+// Oppora employee-count buckets (must match Oppora values exactly).
 const SIZE_OPTIONS: { value: string; label: string }[] = [
-  { value: "1-10", label: "1–10" },
+  { value: "2-10", label: "2–10" },
   { value: "11-50", label: "11–50" },
   { value: "51-200", label: "51–200" },
   { value: "201-500", label: "201–500" },
@@ -28,17 +28,19 @@ const SIZE_OPTIONS: { value: string; label: string }[] = [
   { value: "10001+", label: "10,001+" },
 ];
 
-// PDL indexes industry as an exact keyword, so users pick from the taxonomy.
+// Oppora matches industry as an exact LinkedIn industry name (GET /filters/industries),
+// so users pick from the taxonomy.
 const INDUSTRY_OPTIONS = [
-  "computer software", "information technology and services", "internet",
-  "marketing and advertising", "financial services", "banking", "insurance",
-  "hospital & health care", "health, wellness and fitness", "medical devices",
-  "staffing and recruiting", "human resources", "management consulting",
-  "construction", "real estate", "retail", "e-learning", "education management",
-  "automotive", "logistics and supply chain", "telecommunications",
-  "accounting", "legal services", "restaurants", "hospitality",
-  "mechanical or industrial engineering", "electrical/electronic manufacturing",
-  "oil & energy", "pharmaceuticals", "nonprofit organization management",
+  "Software Development", "IT Services and IT Consulting", "Technology, Information and Internet",
+  "Internet Publishing", "Computer and Network Security", "Data Infrastructure and Analytics",
+  "Advertising Services", "Marketing Services", "Financial Services", "Banking", "Insurance",
+  "Hospitals and Health Care", "Wellness and Fitness Services", "Medical Equipment Manufacturing",
+  "Staffing and Recruiting", "Human Resources Services", "Business Consulting and Services",
+  "Construction", "Real Estate", "Retail", "E-Learning Providers", "Education Administration Programs",
+  "Motor Vehicle Manufacturing", "Transportation, Logistics, Supply Chain and Storage", "Telecommunications",
+  "Accounting", "Legal Services", "Restaurants", "Hospitality", "Manufacturing",
+  "Industrial Machinery Manufacturing", "Appliances, Electrical, and Electronics Manufacturing",
+  "Oil and Gas", "Pharmaceutical Manufacturing", "Non-profit Organizations",
 ];
 
 const PER_PAGE_OPTIONS = [10, 25, 50, 100];
@@ -72,10 +74,17 @@ interface Pagination {
 }
 
 function EmailBadge({ status }: { status: string | null }) {
-  if (status === "verified" || status === "likely") {
+  if (status === "Valid" || status === "verified" || status === "likely") {
     return (
       <span className="inline-flex items-center gap-1 text-emerald-400 text-[11px] font-medium">
         <BadgeCheck size={12} /> Verified
+      </span>
+    );
+  }
+  if (status === "Risky" || status === "Catchall") {
+    return (
+      <span className="inline-flex items-center gap-1 text-amber-400 text-[11px] font-medium" title="Oppora found this address but the mailbox could not be fully confirmed (risky / catch-all domain)">
+        <HelpCircle size={12} /> Risky
       </span>
     );
   }
@@ -104,13 +113,14 @@ export default function GenerateLeadsPage() {
   const [companySizes, setCompanySizes] = useState<string[]>([]);
   const [roles, setRoles] = useState<Role[]>(["hr_talent", "founders_execs"]);
   const [perPage, setPerPage] = useState(25);
+  const [findEmails, setFindEmails] = useState(true);
 
   // results meta
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [appliedTitles, setAppliedTitles] = useState<string[]>([]);
   const [newCount, setNewCount] = useState(0);
   const [duplicateCount, setDuplicateCount] = useState(0);
-  // PDL paging is a forward-only cursor, so we remember the token that opens
+  // Oppora paging is a forward-only cursor, so we remember the token that opens
   // each page — index 0 is page 1 (no token), index 1 is page 2, and so on.
   const [pageTokens, setPageTokens] = useState<(string | null)[]>([null]);
 
@@ -133,9 +143,10 @@ export default function GenerateLeadsPage() {
     setError("");
     setMessage("");
     setProgress(
-      page > 1
+      (page > 1
         ? `Loading page ${page} of matching decision-makers…`
-        : "AI Agent is searching for matching companies and decision-makers…"
+        : "AI Agent is searching for matching companies and decision-makers…") +
+      (findEmails ? " Finding work emails can take up to a minute." : "")
     );
     setSelectedLeads([]);
     setLeads([]);
@@ -147,7 +158,7 @@ export default function GenerateLeadsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           industry, keywords, location, country, companySizes, roles,
-          size: perPage, page, scrollToken: token,
+          size: perPage, page, scrollToken: token, findEmails,
         }),
       });
       const text = await res.text();
@@ -157,7 +168,7 @@ export default function GenerateLeadsPage() {
       } catch {
         throw new Error(
           /^\s*</.test(text)
-            ? "Search failed because the server returned an error page instead of results. Check your People Data Labs search credits and try again."
+            ? "Search failed because the server returned an error page instead of results. Check your Oppora credits and try again."
             : "Search failed: the server returned an invalid response."
         );
       }
@@ -284,7 +295,7 @@ export default function GenerateLeadsPage() {
         <h2 className="text-3xl font-bold text-white mb-2">Find Client Leads</h2>
         <p className="text-slate-400">
           Search a region for companies matching your criteria and get the decision-maker
-          (HR, Talent, or Founder) with a work email — powered by People Data Labs.
+          (HR, Talent, or Founder) with a work email — powered by Oppora.
         </p>
       </div>
 
@@ -302,7 +313,7 @@ export default function GenerateLeadsPage() {
               <select value={industry} onChange={(e) => setIndustry(e.target.value)} className={inputCls}>
                 <option value="">Any industry</option>
                 {INDUSTRY_OPTIONS.map((i) => (
-                  <option key={i} value={i}>{i.replace(/\b[a-z]/g, (c) => c.toUpperCase())}</option>
+                  <option key={i} value={i}>{i}</option>
                 ))}
               </select>
             </div>
@@ -311,7 +322,7 @@ export default function GenerateLeadsPage() {
               <input type="text" value={keywords} onChange={(e) => setKeywords(e.target.value)}
                 placeholder="e.g. talent, recruiting" className={inputCls} />
               <p className="text-[11px] text-slate-500">
-                Partial match — “talent” finds “Head of Talent Acquisition”. Comma-separate for several.
+                Partial match — “talent” finds “Head of Talent Acquisition”. Comma-separate for several. When set, keywords replace the role presets.
               </p>
             </div>
             <div className="space-y-2">
@@ -359,17 +370,29 @@ export default function GenerateLeadsPage() {
                 ))}
               </div>
               <p className="text-[11px] text-slate-500 pt-1">
-                Title keywords and roles are combined — a lead must match both.
+                Roles are matched by job title (Founder, CEO, Head of People, Talent Acquisition, …). Pick several to widen the search.
               </p>
             </div>
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-            <div className="space-y-2 w-full sm:w-48">
-              <label className="text-sm font-medium text-slate-300">Results per page</label>
-              <select value={perPage} onChange={(e) => setPerPage(parseInt(e.target.value) || 25)} className={inputCls}>
-                {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
+            <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+              <div className="space-y-2 w-full sm:w-48">
+                <label className="text-sm font-medium text-slate-300">Results per page</label>
+                <select value={perPage} onChange={(e) => setPerPage(parseInt(e.target.value) || 25)} className={inputCls}>
+                  {PER_PAGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer sm:pb-3 select-none">
+                <input type="checkbox" checked={findEmails} onChange={(e) => setFindEmails(e.target.checked)}
+                  className="rounded border-slate-600 bg-slate-800" />
+                <span>
+                  Find work emails
+                  <span className="block text-[11px] text-slate-500">
+                    Each page costs 10 Oppora credits, plus 1 per email found. Off = best-guess emails only.
+                  </span>
+                </span>
+              </label>
             </div>
             <button type="submit" disabled={loading}
               className="bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-medium transition-all shadow-lg shadow-violet-500/25 flex items-center justify-center gap-2">

@@ -50,8 +50,7 @@ model UserSettings {
   bayOfAssetsKeyEncrypted  String?
   bayOfAssetsModel         String?
   openRouterKeyEncrypted   String?
-  neverBounceKeyEncrypted  String?
-  pdlKeyEncrypted          String?
+  opporaKeyEncrypted       String?
   resendKeyEncrypted       String?
   resendWebhookId          String?
   resendWebhookSecretEncrypted String?

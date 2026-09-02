@@ -1,19 +1,20 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import Link from 'next/link';
-import { Search, Filter, Download, Plus, Trash2, Loader2, Users, X, ChevronDown, ChevronLeft, ChevronRight, ShieldCheck, ShieldQuestion, MailX, Briefcase, Pencil } from "lucide-react";
+import { Search, Filter, Download, Plus, Trash2, Loader2, Users, X, ChevronDown, ChevronLeft, ChevronRight, ShieldCheck, ShieldQuestion, MailX, Briefcase, Pencil, Phone } from "lucide-react";
 import CreateCampaignModal from "../campaigns/CreateCampaignModal";
 
 const EMAIL_STATUS_STYLES: Record<string, string> = {
   Valid: 'bg-green-500/20 text-green-400 border-green-500/30',
   Verified: 'bg-green-500/20 text-green-400 border-green-500/30',
   Invalid: 'bg-red-500/20 text-red-400 border-red-500/30',
+  Risky: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
   Disposable: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
   Catchall: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
   Unknown: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
 };
 
-// NeverBounce verification — shows the deliverability result (Valid/Catchall/Unknown/…) once checked.
+// Oppora verification — shows the deliverability result (Valid/Catchall/Unknown/…) once checked.
 function VerificationBadge({ verifiedAt, status, hasEmail }: { verifiedAt: string | null; status: string | null; hasEmail: boolean }) {
   if (!hasEmail) {
     return <span className="text-slate-600 text-xs">—</span>;
@@ -27,7 +28,7 @@ function VerificationBadge({ verifiedAt, status, hasEmail }: { verifiedAt: strin
           <ShieldCheck size={11} className="shrink-0" />
           {status || 'Verified'}
         </span>
-        <span className="text-[9px] text-slate-500 pl-1">NeverBounce · {when}</span>
+        <span className="text-[9px] text-slate-500 pl-1">Oppora · {when}</span>
       </div>
     );
   }
@@ -86,7 +87,9 @@ function HiringBadge({ lead }: { lead: any }) {
 
 export default function LeadDatabasePage() {
   const [leads, setLeads] = useState<any[]>([]);
-  const [filtered, setFiltered] = useState<any[]>([]);
+  // Filtering/paging happens server-side, so the table rows are just `leads`;
+  // deriving them (instead of a second state) keeps in-place patches (verify, phones, hiring) visible without a refetch.
+  const filtered = leads;
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
@@ -99,6 +102,7 @@ export default function LeadDatabasePage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [findingPhones, setFindingPhones] = useState(false);
   const [checkingHiring, setCheckingHiring] = useState(false);
   const [hiringProgress, setHiringProgress] = useState<{ done: number; total: number } | null>(null);
   const [removingNoEmail, setRemovingNoEmail] = useState(false);
@@ -143,6 +147,7 @@ export default function LeadDatabasePage() {
     jobTitle: l.jobTitle || null,
     email: l.email || null,
     phone: l.phone || null,
+    phoneStatus: l.phoneStatus || null,
     website: l.website || null,
     score: l.leadScore || 0,
     tier: l.leadTier || "Cold",
@@ -180,7 +185,6 @@ export default function LeadDatabasePage() {
       if (data.leads) {
         const mapped = data.leads.map(mapLead);
         setLeads(mapped);
-        setFiltered(mapped);
       }
       if (data.pagination) setPagination(data.pagination);
     } catch (err) {
@@ -259,12 +263,12 @@ export default function LeadDatabasePage() {
     }
   };
 
-  // Verify emails via NeverBounce
+  // Verify emails via Oppora
   const handleVerify = async () => {
     const scope = selectedIds.size > 0 ? filtered.filter(l => selectedIds.has(l.id)) : filtered;
     const withEmail = scope.filter(l => l.email);
 
-    // Never verify the same email twice — skip anything already run through NeverBounce.
+    // Never verify the same email twice — skip anything already run through Oppora.
     const targets = withEmail.filter(l => !l.emailVerifiedAt);
     const alreadyVerified = withEmail.length - targets.length;
 
@@ -280,7 +284,7 @@ export default function LeadDatabasePage() {
     // Cost is per unique email — identical addresses are only checked once.
     const uniqueEmails = new Set(targets.map(l => l.email.toLowerCase())).size;
     const alreadyNote = alreadyVerified > 0 ? `\n${alreadyVerified} already verified (skipped).` : '';
-    if (!confirm(`Verify ${targets.length} ${targets.length === 1 ? 'lead' : 'leads'}?\n\nUses ${uniqueEmails} NeverBounce ${uniqueEmails === 1 ? 'credit' : 'credits'}.${alreadyNote}`)) return;
+    if (!confirm(`Verify ${targets.length} ${targets.length === 1 ? 'lead' : 'leads'}?\n\nUses ${uniqueEmails} Oppora ${uniqueEmails === 1 ? 'credit' : 'credits'}.${alreadyNote}`)) return;
 
     setVerifying(true);
     try {
@@ -306,11 +310,73 @@ export default function LeadDatabasePage() {
         .map(([status, count]) => `${status}: ${count}`)
         .join('\n');
       const errorNote = data.errors?.length ? `\n\n${data.errors.length} failed — ${data.errors[0]}` : '';
-      alert(`Verified ${data.verified} ${data.verified === 1 ? 'lead' : 'leads'}\n\n${breakdown}${errorNote}`);
+      const warnNote = data.warning && !data.errors?.length ? `\n\n${data.warning}` : '';
+      alert(`Verified ${data.verified} ${data.verified === 1 ? 'lead' : 'leads'}\n\n${breakdown}${errorNote}${warnNote}`);
     } catch {
       alert('Verification failed. Please try again.');
     } finally {
       setVerifying(false);
+    }
+  };
+
+  // Populate phone numbers via Oppora for the selected leads (or the current filtered list).
+  const handleFindPhones = async () => {
+    const scope = selectedIds.size > 0 ? filtered.filter(l => selectedIds.has(l.id)) : filtered;
+    const withoutPhone = scope.filter(l => !l.phone);
+
+    if (withoutPhone.length === 0) {
+      alert(scope.length === 0 ? 'No leads to look up.' : 'All selected leads already have a phone number.');
+      return;
+    }
+
+    // Skip leads Oppora already came up empty on, unless the user explicitly wants a retry.
+    let targets = withoutPhone.filter(l => l.phoneStatus !== 'NotFound');
+    let force = false;
+    const previouslyMissed = withoutPhone.length - targets.length;
+
+    if (targets.length === 0) {
+      if (!confirm(`All ${withoutPhone.length} selected ${withoutPhone.length === 1 ? 'lead was' : 'leads were'} already looked up with no phone found.\n\nTry again anyway? (No charge for misses.)`)) return;
+      targets = withoutPhone;
+      force = true;
+    } else {
+      const missedNote = previouslyMissed > 0 ? `\n${previouslyMissed} previously not found (skipped).` : '';
+      if (!confirm(`Look up phone numbers for ${targets.length} ${targets.length === 1 ? 'lead' : 'leads'}?\n\nUses 1 Oppora phone credit per number found — no charge for misses.${missedNote}`)) return;
+    }
+
+    setFindingPhones(true);
+    try {
+      const res = await fetch('/api/leads/find-phone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leadIds: targets.map(l => l.id), force })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || 'Phone lookup failed.');
+        return;
+      }
+
+      // Patch phones in place so the table updates without a refetch.
+      const byId = new Map<string, any>((data.results || []).map((r: any) => [r.id, r]));
+      setLeads(prev => prev.map(l => (byId.has(l.id)
+        ? { ...l, phone: byId.get(l.id).phone ?? l.phone, phoneStatus: byId.get(l.id).phoneStatus }
+        : l)));
+
+      if (data.message) {
+        alert(data.message);
+        return;
+      }
+      const notes: string[] = [];
+      if (data.notFound) notes.push(`${data.notFound} not found`);
+      if (data.skippedNoIdentity) notes.push(`${data.skippedNoIdentity} skipped (need a LinkedIn URL or name + company)`);
+      if (data.errors?.length) notes.push(`${data.errors.length} failed — ${data.errors[0]}`);
+      else if (data.warning) notes.push(data.warning);
+      alert(`Found ${data.found} phone ${data.found === 1 ? 'number' : 'numbers'}${notes.length ? `\n\n${notes.join('\n')}` : ''}`);
+    } catch {
+      alert('Phone lookup failed. Please try again.');
+    } finally {
+      setFindingPhones(false);
     }
   };
 
@@ -430,12 +496,12 @@ export default function LeadDatabasePage() {
   const handleAddToCampaign = async () => {
     if (!selectedCampaignId) return alert('Please select a campaign.');
 
-    // Optionally restrict to leads NeverBounce has verified.
+    // Optionally restrict to leads Oppora has verified.
     let targetLeads = leads.filter(l => selectedIds.has(l.id));
     if (onlyVerifiedForCampaign) {
       targetLeads = targetLeads.filter(l => l.emailVerifiedAt);
       if (targetLeads.length === 0) {
-        return alert('None of the selected leads are NeverBounce-verified. Verify them first, or turn off the filter.');
+        return alert('None of the selected leads are Oppora-verified. Verify them first, or turn off the filter.');
       }
     }
 
@@ -572,6 +638,15 @@ export default function LeadDatabasePage() {
             <span>{verifying ? 'Verifying…' : 'Verify Leads'}</span>
           </button>
           <button
+            onClick={handleFindPhones}
+            disabled={findingPhones}
+            title="Look up phone numbers via Oppora for leads that don't have one"
+            className="flex items-center space-x-2 px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-60 text-white rounded-lg transition-colors shadow-lg shadow-amber-500/25"
+          >
+            {findingPhones ? <Loader2 size={16} className="animate-spin" /> : <Phone size={16} />}
+            <span>{findingPhones ? 'Finding…' : 'Find Phones'}</span>
+          </button>
+          <button
             onClick={handleCheckHiring}
             disabled={checkingHiring}
             title="Research each lead's hiring status (careers page, LinkedIn, job boards) via Perplexity"
@@ -629,6 +704,14 @@ export default function LeadDatabasePage() {
             >
               {verifying ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
               {verifying ? 'Verifying…' : `Verify ${selectedIds.size}`}
+            </button>
+            <button
+              onClick={handleFindPhones}
+              disabled={findingPhones}
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-60 text-white text-xs rounded-md border border-amber-500 flex items-center gap-1 font-medium transition-colors"
+            >
+              {findingPhones ? <Loader2 size={13} className="animate-spin" /> : <Phone size={13} />}
+              {findingPhones ? 'Finding…' : `Find Phones ${selectedIds.size}`}
             </button>
             <button
               onClick={handleCheckHiring}
@@ -829,7 +912,7 @@ export default function LeadDatabasePage() {
                       <HiringBadge lead={lead} />
                     </td>
                     <td className="px-6 py-4">
-                      <div>{lead.phone || '—'}</div>
+                      <div>{lead.phone || (lead.phoneStatus === 'NotFound' ? <span className="text-slate-600 text-xs">Not found</span> : '—')}</div>
                       <div className="text-xs text-slate-500">{lead.website || ''}</div>
                     </td>
                     <td className="px-6 py-4">
@@ -945,7 +1028,7 @@ export default function LeadDatabasePage() {
                       )}.
                     </p>
 
-                    {/* NeverBounce-verified-only filter */}
+                    {/* Oppora-verified-only filter */}
                     <button
                       type="button"
                       onClick={() => setOnlyVerifiedForCampaign(v => !v)}
@@ -959,7 +1042,7 @@ export default function LeadDatabasePage() {
                         <ShieldCheck size={16} className={onlyVerifiedForCampaign ? 'text-emerald-400' : 'text-slate-500'} />
                         <span className="flex flex-col">
                           <span className={`text-sm font-medium ${onlyVerifiedForCampaign ? 'text-emerald-300' : 'text-slate-300'}`}>
-                            Only NeverBounce-verified leads
+                            Only Oppora-verified leads
                           </span>
                           <span className="text-[11px] text-slate-500">{verifiedCount} of {selectedLeads.length} selected are verified</span>
                         </span>
